@@ -221,21 +221,19 @@ You may be provided with one or more images of the same package from different a
 STEP 0 — IMAGE VALIDITY CHECK  (answer this before everything else)
 ═══════════════════════════════════════════════════════════
 Set is_valid_package_image = TRUE if ANY of the provided images shows ANY of:
-  • A manufactured/processed product in any kind of packaging
-  • A food, beverage, snack, medicine, cosmetic, FMCG, or household product
-  • Any wrapper, pouch, box, bottle, can, sachet, jar, carton, tube, or container
-  • The above even if held in a hand, at an angle, partially cropped, or blurry
-  • The above even if only part of the label is visible
-  • ANY physical object that looks like it could be a product you buy in a store.
+  • A manufactured/processed product or ANY packaging material
+  • Any label, sticker, panel, wrapper, pouch, box, bottle, can, sachet, jar, carton, tube, or container
+  • Any printed consumer text, declarations, brand name, barcode, MRP, net weight, ingredients, or manufacturer details
+  • The above even if held in a hand, close-up, tightly cropped, angled, or showing only one panel/corner
+  • Any physical object or document that represents packaged product evidence under Section 36.
 
-Set is_valid_package_image = FALSE ONLY if ALL images are clearly and unmistakably:
-  • A pure selfie of a person with NO objects held in their hands or in frame
-  • A plain human hand or body part with NO product present
-  • Scenery, a wall, an empty room, or a blank/solid-colour surface
-  • A computer or phone screen with no product
-  • Completely unidentifiable / too dark to see anything
+Set is_valid_package_image = FALSE ONLY if ALL images are completely and unmistakably:
+  • A pure selfie or photo of a person with NO products, labels, or packaging present
+  • A completely empty surface, plain bare wall/desk with ZERO product, text, or label visible
+  • An outdoor landscape, scenery, or animal with no commercial products
+  • Completely pitch black or unidentifiable darkness
 
-IMPORTANT: If you can see ANY manufactured product or container at all in ANY image, even partially, set TRUE.
+IMPORTANT: If you can see ANY printed packaging text, label, or manufactured product at all in ANY image, ALWAYS set is_valid_package_image = TRUE and proceed to extract all visible fields.
 If is_valid_package_image = FALSE, set invalid_reason explaining why, and you may put empty defaults in all other fields.
 If is_valid_package_image = TRUE, set invalid_reason to "" and proceed to Steps 1 and 2 below.
 
@@ -334,22 +332,18 @@ export async function POST(req: NextRequest) {
             return { inlineData: { data: base64Data, mimeType } };
         });
 
-        // ── Model — gemini-3.6-flash (current stable, as per API directive) ───
-        const MODEL      = 'gemini-3.6-flash';
-        const MAX_RETRIES = 3;
-        const RETRY_MS    = 1500;
+        // ── Multi-Model Cascade: automatically falls back across models if 429 quota or 503 occur ───
+        const CANDIDATE_MODELS = [
+            'gemini-3.5-flash',
+            'gemini-3.7-flash',
+            'gemini-flash-latest',
+            'gemini-3.5-flash-lite',
+            'gemini-3.1-flash-lite',
+            'gemini-3.6-flash',
+        ];
 
         const genAI = new GoogleGenerativeAI(apiKey);
 
-        function isRetryable(err: unknown): boolean {
-            const msg = err instanceof Error ? err.message : String(err);
-            return msg.includes('503') || msg.includes('Service Unavailable') ||
-                   msg.includes('429') || msg.includes('Too Many Requests') ||
-                   msg.includes('overloaded');
-        }
-        const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-
-        // ── Single API call with retry ───────────────────────────────────────
         const genConfig = {
             responseMimeType: 'application/json' as const,
             temperature: 0.1,
@@ -359,28 +353,37 @@ export async function POST(req: NextRequest) {
 
         let raw: string | null = null;
         let lastErr: unknown;
+        let isQuotaError = false;
 
-        for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        for (const modelName of CANDIDATE_MODELS) {
             try {
-                const model = genAI.getGenerativeModel({ model: MODEL, generationConfig: genConfig });
+                const model = genAI.getGenerativeModel({ model: modelName, generationConfig: genConfig });
                 const result = await model.generateContent(payload);
                 raw = result.response.text();
-                break;
-            } catch (err) {
-                lastErr = err;
-                if (isRetryable(err) && attempt < MAX_RETRIES) {
-                    console.warn(`[inspect] Attempt ${attempt}/${MAX_RETRIES} failed, retrying in ${RETRY_MS}ms…`);
-                    await sleep(RETRY_MS);
-                } else {
+                if (raw) {
+                    console.log(`[inspect] Successfully evaluated packaging via ${modelName}`);
                     break;
                 }
+            } catch (err: unknown) {
+                lastErr = err;
+                const msg = err instanceof Error ? err.message : String(err);
+                const is429 = msg.includes('429') || msg.includes('quota') || msg.includes('Too Many Requests');
+                if (is429) isQuotaError = true;
+                console.warn(`[inspect] Model ${modelName} failed (${is429 ? '429 Quota Exceeded' : msg.slice(0, 70)}). Falling back to next candidate…`);
             }
         }
 
         if (!raw) {
-            const msg = lastErr instanceof Error ? lastErr.message : 'Gemini API unavailable after retries.';
-            console.error('[inspect] All retries exhausted:', msg);
-            return NextResponse.json({ error: msg }, { status: 503 });
+            const msg = lastErr instanceof Error ? lastErr.message : 'Gemini vision service unavailable.';
+            console.error('[inspect] All vision models exhausted:', msg);
+            return NextResponse.json({
+                success: false,
+                quota_exhausted: isQuotaError,
+                error_type: isQuotaError ? 'QUOTA_EXCEEDED' : 'API_ERROR',
+                error: isQuotaError
+                    ? 'Gemini AI Free Tier quota limit reached. Please enable Offline Demo Mode to test or retry in a minute.'
+                    : msg,
+            }, { status: isQuotaError ? 429 : 503 });
         }
 
         // ── Parse response ───────────────────────────────────────────────────
@@ -391,11 +394,23 @@ export async function POST(req: NextRequest) {
 
         // ── Image validity gate ──────────────────────────────────────────────
         if (!parsed.is_valid_package_image) {
-            return NextResponse.json({
-                success: false,
-                invalid_image: true,
-                reason: parsed.invalid_reason || 'The image does not appear to contain a packaged commodity. Please photograph a product label or packaging.',
-            }, { status: 200 });
+            // Guard: If the model extracted ANY statutory declaration (commodity, MRP, net qty, or manufacturer)
+            // even if it set false due to close cropping, override to valid!
+            const hasExtractedDeclarations = Boolean(
+                (parsed.commodity_name?.is_detected && parsed.commodity_name?.raw_text) ||
+                (parsed.net_quantity?.numeric_value && parsed.net_quantity.numeric_value > 0) ||
+                (parsed.mrp?.numeric_value && parsed.mrp.numeric_value > 0) ||
+                (parsed.manufacturer?.is_detected && parsed.manufacturer?.raw_text) ||
+                (parsed.consumer_care?.has_phone || parsed.consumer_care?.has_email)
+            );
+
+            if (!hasExtractedDeclarations) {
+                return NextResponse.json({
+                    success: false,
+                    invalid_image: true,
+                    reason: parsed.invalid_reason || 'The image does not appear to contain a packaged commodity. Please photograph a product label or packaging.',
+                }, { status: 200 });
+            }
         }
 
         // ── Strip extra fields before passing to rule engine ─────────────────

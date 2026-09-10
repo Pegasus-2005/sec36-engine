@@ -42,6 +42,8 @@ import {
   Menu,
   Archive,
   LogOut,
+  RefreshCcw,
+  AlertCircle,
 } from 'lucide-react';
 
 // ---------------------------------------------------------------------------
@@ -203,6 +205,11 @@ export default function Dashboard() {
   const [amendModalOpen, setAmendModalOpen] = useState(false);
   const [draft, setDraft] = useState<ExtractedDeclarations | null>(null);
   const [invalidImageError, setInvalidImageError] = useState<string | null>(null);
+  const [inspectionApiError, setInspectionApiError] = useState<{
+    title: string;
+    message: string;
+    isQuota?: boolean;
+  } | null>(null);
   const [activeDossierIndex, setActiveDossierIndex] = useState(0);
   const [uploadCropSrc, setUploadCropSrc] = useState<string | null>(null);
   const [mobileTab, setMobileTab] = useState<'surveillance' | 'audit'>('surveillance');
@@ -515,6 +522,7 @@ export default function Dashboard() {
     setActiveDossierIndex(0);
     setAuditResult(null);
     setInvalidImageError(null);
+    setInspectionApiError(null);
     setMainView('terminal');
 
     if (isDemoMode) {
@@ -532,22 +540,37 @@ export default function Dashboard() {
       const res  = await fetch('/api/inspect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ images: base64Images }) });
       const data = await res.json();
       if (data.invalid_image) {
-        // Phase-1 validation rejected the image
-        setInvalidImageError(data.reason ?? 'The image does not appear to be a packaged commodity.');
+        // Genuine image validity rejection
+        setInvalidImageError(data.reason ?? 'The image does not appear to contain a packaged commodity. Please photograph a product label or packaging.');
         setMobileTab('audit');
       } else if (data.success) {
         setAuditResult(data.audit);
         setMobileTab('audit');
         appendToDocket(data.audit, base64Images[0], base64Images);
         speakAuditResult(data.audit);
+      } else if (data.quota_exhausted) {
+        setInspectionApiError({
+          title: 'Gemini AI Free Tier Quota Reached',
+          message: data.error || 'The free tier quota limit was reached on the cloud vision models. Please enable Offline Demo Mode to test with instant simulated data, or retry in a minute.',
+          isQuota: true,
+        });
+        setMobileTab('audit');
       } else {
         console.error('Audit API error:', data.error);
-        setInvalidImageError('Inspection failed. Please try again or enable Offline Demo Mode.');
+        setInspectionApiError({
+          title: 'Inspection Service Unavailable',
+          message: data.error || 'The cloud inspection service encountered an issue. You can enable Offline Demo Mode to test full audit capabilities.',
+          isQuota: false,
+        });
         setMobileTab('audit');
       }
     } catch (err) {
       console.error('Network error:', err);
-      setInvalidImageError('Network error — cannot reach the inspection service.');
+      setInspectionApiError({
+        title: 'Network Communication Error',
+        message: 'Could not connect to the inspection service. Please check your network connection or switch to Offline Demo Mode.',
+        isQuota: false,
+      });
       setMobileTab('audit');
     } finally {
       setIsAuditing(false);
@@ -1179,6 +1202,7 @@ export default function Dashboard() {
                         setCapturedImages([]);
                         setAuditResult(null);
                         setInvalidImageError(null);
+                        setInspectionApiError(null);
                       }}
                       className="flex items-center gap-1 text-[10px] font-semibold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 px-2 py-0.5 border border-red-200 rounded-xs cursor-pointer transition-colors"
                     >
@@ -1269,7 +1293,7 @@ export default function Dashboard() {
 
               <div className="p-5 space-y-4">
 
-                {/* Invalid image rejection */}
+                {/* Genuine Invalid image rejection (e.g. selfie / blank desk) */}
                 {!auditResult && !isAuditing && invalidImageError && (
                   <div
                     className="p-5 flex flex-col items-center gap-3 text-center"
@@ -1288,8 +1312,69 @@ export default function Dashboard() {
                   </div>
                 )}
 
+                {/* API Service / Quota / Network Error (Distinct from Invalid Image) */}
+                {!auditResult && !isAuditing && inspectionApiError && (
+                  <div
+                    className="p-5 flex flex-col items-center gap-3 text-center"
+                    style={{
+                      border: inspectionApiError.isQuota ? '1px solid #fcd34d' : '1px solid #fca5a5',
+                      backgroundColor: inspectionApiError.isQuota ? '#fffbeb' : '#fff5f5',
+                      borderRadius: '2px',
+                    }}
+                  >
+                    <div
+                      className="w-12 h-12 rounded-full flex items-center justify-center"
+                      style={{ backgroundColor: inspectionApiError.isQuota ? '#fef3c7' : '#fee2e2' }}
+                    >
+                      {inspectionApiError.isQuota ? (
+                        <WifiOff className="w-6 h-6 text-amber-600" />
+                      ) : (
+                        <AlertCircle className="w-6 h-6 text-red-600" />
+                      )}
+                    </div>
+                    <div>
+                      <p className={`text-sm font-bold ${inspectionApiError.isQuota ? 'text-amber-900' : 'text-red-800'}`}>
+                        {inspectionApiError.title}
+                      </p>
+                      <p className={`text-xs mt-1 max-w-md ${inspectionApiError.isQuota ? 'text-amber-800' : 'text-red-600'}`}>
+                        {inspectionApiError.message}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2 mt-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsDemoMode(true);
+                          setInspectionApiError(null);
+                          if (capturedImages.length > 0) {
+                            runAudit(capturedImages);
+                          }
+                        }}
+                        className="px-3.5 py-2 bg-amber-600 hover:bg-amber-500 active:scale-95 text-white text-xs font-bold rounded shadow-xs cursor-pointer transition-all flex items-center gap-1.5"
+                      >
+                        <WifiOff className="w-3.5 h-3.5" />
+                        <span>Enable Offline Demo Mode</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (capturedImages.length > 0) {
+                            runAudit(capturedImages);
+                          }
+                        }}
+                        className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-200 text-xs font-semibold rounded cursor-pointer transition-all flex items-center gap-1.5"
+                      >
+                        <RefreshCcw className="w-3.5 h-3.5" />
+                        <span>Retry Audit</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {/* Empty state */}
-                {!auditResult && !isAuditing && !invalidImageError && (
+                {!auditResult && !isAuditing && !invalidImageError && !inspectionApiError && (
                   <div
                     className="h-72 flex flex-col items-center justify-center gap-3"
                     style={{ border: `2px dashed ${NIC_BORDER}`, borderRadius: '2px' }}
