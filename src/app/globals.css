@@ -1,26 +1,134 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #F8F9FA;
+  --foreground: #111827;
+  --nic-blue: #0055A4;
+  --nic-saffron: #FF9933;
+  --nic-green: #138808;
+  --nic-border: #E5E7EB;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: 'Inter', Arial, Helvetica, sans-serif;
+  margin: 0;
+  padding: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
+
+/* Formal NIC portal top accent bar */
+.nic-header-accent {
+  height: 4px;
+  width: 100%;
+  background: linear-gradient(to right, var(--nic-saffron) 33%, #FFFFFF 33%, #FFFFFF 66%, var(--nic-green) 66%);
+  border-bottom: 1px solid var(--nic-blue);
+}
+
+/* GIGW 3.0 Accessibility Font Scaling */
+html.font-scale-sm {
+  font-size: 14px;
+}
+html.font-scale-md {
+  font-size: 16px;
+}
+html.font-scale-lg {
+  font-size: 18px;
+}
+
+/* High Contrast Field Mode (GIGW 3.0 / WCAG AAA Compliant Sunlight Mode) */
+body.high-contrast {
+  background-color: #000000 !important;
+  color: #FFFFFF !important;
+}
+
+body.high-contrast header,
+body.high-contrast nav,
+body.high-contrast footer,
+body.high-contrast main,
+body.high-contrast section,
+body.high-contrast div,
+body.high-contrast aside {
+  background-color: #0d0d0d !important;
+  color: #FFFFFF !important;
+  border-color: #444444 !important;
+}
+
+body.high-contrast h1,
+body.high-contrast h2,
+body.high-contrast h3,
+body.high-contrast h4,
+body.high-contrast h5,
+body.high-contrast h6 {
+  color: #FFD700 !important;
+}
+
+body.high-contrast p,
+body.high-contrast span,
+body.high-contrast label,
+body.high-contrast td,
+body.high-contrast th,
+body.high-contrast code {
+  color: #F3F4F6 !important;
+}
+
+body.high-contrast button {
+  background-color: #1a1a1a !important;
+  color: #FFD700 !important;
+  border: 1px solid #FFD700 !important;
+}
+
+body.high-contrast button:hover {
+  background-color: #FFD700 !important;
+  color: #000000 !important;
+}
+
+body.high-contrast input,
+body.high-contrast select,
+body.high-contrast textarea {
+  background-color: #000000 !important;
+  color: #FFFFFF !important;
+  border: 1px solid #FFD700 !important;
+}
+
+body.high-contrast a {
+  color: #38BDF8 !important;
+  text-decoration: underline !important;
+}
+
+body.high-contrast tr:nth-child(even) {
+  background-color: #141414 !important;
+}
+
+body.high-contrast [style*="border"],
+body.high-contrast [style*="borderColor"] {
+  border-color: #555555 !important;
+}
+
+/* Watermark for Government Dockets */
+.gov-watermark {
+  position: relative;
+}
+.gov-watermark::before {
+  content: "GOVT. OF INDIA • OFFICIAL ENFORCEMENT RECORD";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) rotate(-30deg);
+  font-size: 2.2rem;
+  font-weight: 900;
+  color: rgba(0, 85, 164, 0.04);
+  pointer-events: none;
+  white-space: nowrap;
+  letter-spacing: 0.15em;
+  z-index: 0;
+}
+
