@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { DocketRepository } from '../components/audit/DocketRepository';
 import { CameraScanner } from '../components/scanner/CameraScanner';
 import { BoundingBoxOverlay } from '../components/scanner/BoundingBoxOverlay';
@@ -289,21 +289,58 @@ export default function Dashboard() {
     }
   }, [isHighContrast]);
 
-  // ── Load persisted docket history from API ─────────────────────
-  const fetchDockets = () => {
-    fetch('/api/dockets')
-      .then((res) => res.json())
+  // ── Load persisted docket history from API with real-time multi-device sync ──
+  const fetchDockets = useCallback(() => {
+    fetch(`/api/dockets?_t=${Date.now()}`, {
+      cache: 'no-store',
+      headers: { 'Cache-Control': 'no-cache' },
+    })
+      .then((res) => {
+        if (!res.ok) return null;
+        return res.json();
+      })
       .then((data) => {
-        if (data.success && Array.isArray(data.dockets)) {
-          setDocketHistory(data.dockets);
+        if (data && data.success && Array.isArray(data.dockets)) {
+          setDocketHistory((prev) => {
+            if (prev.length !== data.dockets.length) {
+              return data.dockets;
+            }
+            const prevIds = prev.map((d) => d.result?.inspection_id || '').join('|');
+            const newIds = data.dockets.map((d: any) => d.result?.inspection_id || '').join('|');
+            if (prevIds !== newIds) {
+              return data.dockets;
+            }
+            return prev;
+          });
         }
       })
       .catch(() => { /* ignore */ });
-  };
+  }, []);
 
   useEffect(() => {
+    // 1. Initial fetch
     fetchDockets();
-  }, []);
+
+    // 2. Real-time background polling every 2.5s to sync changes from mobile or other clients
+    const interval = setInterval(fetchDockets, 2500);
+
+    // 3. Instant sync on window focus or tab visibility change
+    const onFocus = () => fetchDockets();
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchDockets();
+      }
+    };
+
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [fetchDockets]);
 
   const handleDeleteDocket = async (id: string) => {
     try {
@@ -379,6 +416,7 @@ export default function Dashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(entry),
       });
+      fetchDockets();
     } catch (err) {
       console.error('Failed to persist docket entry to /api/dockets:', err);
     }

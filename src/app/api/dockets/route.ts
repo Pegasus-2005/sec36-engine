@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server';
 import fs from 'fs/promises';
 import path from 'path';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 const dbPath = path.join(process.cwd(), 'data', 'dockets.json');
 
 // Local serverless memory fallback cache
@@ -103,14 +106,30 @@ async function getDockets(): Promise<any[]> {
 export async function GET() {
   try {
     const dockets = await getDockets();
-    return NextResponse.json({
-      success: true,
-      dockets,
-      storageMode: KV_URL ? 'cloud_kv' : 'local_file',
-    });
+    return NextResponse.json(
+      {
+        success: true,
+        dockets,
+        storageMode: KV_URL ? 'cloud_kv' : 'local_file',
+      },
+      {
+        headers: {
+          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0',
+          Pragma: 'no-cache',
+          Expires: '0',
+        },
+      }
+    );
   } catch (error) {
     console.error('Error reading dockets DB:', error);
-    return NextResponse.json({ success: true, dockets: memoryDockets });
+    return NextResponse.json(
+      { success: true, dockets: memoryDockets },
+      {
+        headers: {
+          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0',
+        },
+      }
+    );
   }
 }
 

@@ -200,6 +200,7 @@ export interface ExtractedDeclarations {
 export type ViolationSeverity = 'CRITICAL' | 'MAJOR' | 'MODERATE';
 
 export interface DocketEntry {
+  id?: string;
   result: InspectionAuditResult;
   commodityLabel: string;
   manufacturerLabel: string;
