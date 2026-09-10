@@ -1910,8 +1910,8 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* ── GIGW 3.0 Certified Government Footer (Hidden on Mobile) ────────────────────────── */}
-      <footer className="hidden lg:block" style={{ backgroundColor: '#FFFFFF', borderTop: `1px solid ${NIC_BORDER}` }}>
+      {/* ── GIGW 3.0 Certified Government Footer ────────────────────────── */}
+      <footer style={{ backgroundColor: '#FFFFFF', borderTop: `1px solid ${NIC_BORDER}` }}>
         <div className="px-4 py-4 sm:px-6 sm:py-6 space-y-3 max-w-7xl mx-auto">
           {/* Top row with Logos & Certifications */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 pb-4">
