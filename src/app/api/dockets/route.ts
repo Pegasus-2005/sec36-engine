@@ -11,18 +11,33 @@ let memoryDockets: any[] = [];
 const KV_URL = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
 const KV_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
 
+/** Execute an arbitrary Upstash / Vercel KV command over REST */
+async function runKvCommand(command: any[]): Promise<any> {
+  if (!KV_URL || !KV_TOKEN) return null;
+  const cleanUrl = KV_URL.replace(/\/+$/, '');
+  const res = await fetch(`${cleanUrl}/`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${KV_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(command),
+    cache: 'no-store',
+  });
+  if (!res.ok) {
+    throw new Error(`KV command failed with HTTP ${res.status}`);
+  }
+  const data = await res.json();
+  return data?.result;
+}
+
 /** Fetch dockets from Cloud Database (Vercel KV / Upstash) if configured */
 async function getCloudDockets(): Promise<any[] | null> {
   if (!KV_URL || !KV_TOKEN) return null;
   try {
-    const res = await fetch(`${KV_URL}/get/sec36_dockets`, {
-      headers: { Authorization: `Bearer ${KV_TOKEN}` },
-      cache: 'no-store',
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (!data || data.result === null || data.result === undefined) return [];
-    const parsed = typeof data.result === 'string' ? JSON.parse(data.result) : data.result;
+    const raw = await runKvCommand(['GET', 'sec36_dockets']);
+    if (raw === null || raw === undefined) return [];
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
     return Array.isArray(parsed) ? parsed : [];
   } catch (err) {
     console.warn('Cloud KV read error, falling back to local storage:', err);
@@ -34,15 +49,8 @@ async function getCloudDockets(): Promise<any[] | null> {
 async function saveCloudDockets(dockets: any[]): Promise<boolean> {
   if (!KV_URL || !KV_TOKEN) return false;
   try {
-    const res = await fetch(`${KV_URL}/set/sec36_dockets`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${KV_TOKEN}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(JSON.stringify(dockets)),
-    });
-    return res.ok;
+    const res = await runKvCommand(['SET', 'sec36_dockets', JSON.stringify(dockets)]);
+    return res !== null;
   } catch (err) {
     console.warn('Cloud KV write error:', err);
     return false;
@@ -53,11 +61,8 @@ async function saveCloudDockets(dockets: any[]): Promise<boolean> {
 async function clearCloudDockets(): Promise<boolean> {
   if (!KV_URL || !KV_TOKEN) return false;
   try {
-    const res = await fetch(`${KV_URL}/del/sec36_dockets`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${KV_TOKEN}` },
-    });
-    return res.ok;
+    const res = await runKvCommand(['DEL', 'sec36_dockets']);
+    return res !== null;
   } catch (err) {
     console.warn('Cloud KV delete error:', err);
     return false;
