@@ -1,6 +1,12 @@
 [
   {
     "result": {
+      "inspection_id": "INSP-TEST-RETRY"
+    },
+    "commodityLabel": "Test"
+  },
+  {
+    "result": {
       "inspection_id": "INSP-47852450",
       "timestamp": "2026-09-10T13:44:12.450Z",
       "extracted_data": {
