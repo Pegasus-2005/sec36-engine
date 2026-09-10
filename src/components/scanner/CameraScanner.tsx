@@ -377,23 +377,8 @@ export function CameraScanner({ onScanComplete, isLoading }: CameraScannerProps)
             
             <canvas ref={canvasRef} className="hidden" />
 
-            </div>
-            <style jsx>{`
-                .custom-scrollbar::-webkit-scrollbar {
-                    height: 6px;
-                }
-                .custom-scrollbar::-webkit-scrollbar-track {
-                    background: rgba(30, 41, 59, 0.5);
-                    border-radius: 4px;
-                }
-                .custom-scrollbar::-webkit-scrollbar-thumb {
-                    background: rgba(71, 85, 105, 0.8);
-                    border-radius: 4px;
-                }
-                .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-                    background: rgba(100, 116, 139, 1);
-                }
-            `}</style>
+                </div>
+            )}
 
             <ImageCropModal
                 isOpen={cropImageSrc !== null}

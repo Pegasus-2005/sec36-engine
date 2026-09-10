@@ -30,15 +30,14 @@ export function ImageCropModal({
 
   // Crop box in percentage (0 to 100)
   const [crop, setCrop] = useState<CropBox>({ x: 10, y: 10, w: 80, h: 80 });
+  const [prevImageSrc, setPrevImageSrc] = useState(imageSrc);
+  if (prevImageSrc !== imageSrc) {
+    setPrevImageSrc(imageSrc);
+    setCrop({ x: 10, y: 10, w: 80, h: 80 });
+  }
+
   const [activeHandle, setActiveHandle] = useState<string | null>(null);
   const [dragStart, setDragStart] = useState<{ mouseX: number; mouseY: number; initialCrop: CropBox } | null>(null);
-
-  // Reset crop box when image changes
-  useEffect(() => {
-    if (isOpen) {
-      setCrop({ x: 10, y: 10, w: 80, h: 80 });
-    }
-  }, [isOpen, imageSrc]);
 
   const handlePointerDown = (handle: string, e: React.PointerEvent) => {
     e.preventDefault();

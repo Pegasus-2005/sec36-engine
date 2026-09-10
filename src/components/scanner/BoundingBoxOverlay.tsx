@@ -237,6 +237,7 @@ export function BoundingBoxOverlay({
   violations = [],
   surfaceLabel,
   onApplyFontMeasurement,
+  onFullscreenToggle,
 }: BoundingBoxOverlayProps) {
   const [showOverlay, setShowOverlay] = useState(true);
   const [caliperMode, setCaliperMode] = useState(false);

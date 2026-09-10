@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { X, ChevronLeft, ChevronRight, ZoomIn, ZoomOut } from 'lucide-react';
 
 interface FullScreenImageViewerProps {
@@ -11,6 +11,16 @@ export function FullScreenImageViewer({ images, initialIndex = 0, onClose }: Ful
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
   const [scale, setScale] = useState(1);
 
+  const handlePrev = useCallback(() => {
+    setCurrentIndex((prev) => (prev > 0 ? prev - 1 : images.length - 1));
+    setScale(1);
+  }, [images.length]);
+
+  const handleNext = useCallback(() => {
+    setCurrentIndex((prev) => (prev < images.length - 1 ? prev + 1 : 0));
+    setScale(1);
+  }, [images.length]);
+
   // Handle keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -20,17 +30,7 @@ export function FullScreenImageViewer({ images, initialIndex = 0, onClose }: Ful
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentIndex]);
-
-  const handlePrev = () => {
-    setCurrentIndex((prev) => (prev > 0 ? prev - 1 : images.length - 1));
-    setScale(1);
-  };
-
-  const handleNext = () => {
-    setCurrentIndex((prev) => (prev < images.length - 1 ? prev + 1 : 0));
-    setScale(1);
-  };
+  }, [handleNext, handlePrev, onClose]);
 
   return (
     <div className="fixed inset-0 z-[300] bg-black flex flex-col touch-none">
