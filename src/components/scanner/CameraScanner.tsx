@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useState, useCallback, useEffect } from 'react';
-import { Camera, Upload, RefreshCcw, CameraOff, FlipHorizontal, Check, Trash2, Box, Send, Crop } from 'lucide-react';
+import { Camera, Upload, RefreshCcw, CameraOff, FlipHorizontal, Trash2, Box, Send, Crop, Zap, X, Plus } from 'lucide-react';
 import { ImageCropModal } from './ImageCropModal';
 
 declare global {
@@ -16,6 +16,8 @@ interface CameraScannerProps {
     isLoading: boolean;
 }
 
+const SURFACE_NAMES = ['Front PDP', 'Back Info Panel', 'Side / Ingredients', 'Panel 4'];
+
 export function CameraScanner({ onScanComplete, isLoading }: CameraScannerProps) {
     const videoRef = useRef<HTMLVideoElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -23,6 +25,8 @@ export function CameraScanner({ onScanComplete, isLoading }: CameraScannerProps)
     const [isActive, setIsActive] = useState(false);
     const [cameraError, setCameraError] = useState<string | null>(null);
     const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment');
+    const [torchOn, setTorchOn] = useState(false);
+    const [supportsTorch, setSupportsTorch] = useState(false);
     
     // Multi-surface dossier state
     const [capturedImages, setCapturedImages] = useState<string[]>([]);
@@ -45,6 +49,40 @@ export function CameraScanner({ onScanComplete, isLoading }: CameraScannerProps)
         }
     }, [stream]);
 
+    // Check torch / flashlight support
+    useEffect(() => {
+        if (!stream) {
+            setSupportsTorch(false);
+            setTorchOn(false);
+            return;
+        }
+        const track = stream.getVideoTracks()[0];
+        if (track && typeof track.getCapabilities === 'function') {
+            try {
+                const capabilities = track.getCapabilities() as any;
+                setSupportsTorch(Boolean(capabilities?.torch));
+            } catch {
+                setSupportsTorch(false);
+            }
+        } else {
+            setSupportsTorch(false);
+        }
+    }, [stream]);
+
+    const toggleTorch = async () => {
+        if (!stream) return;
+        const track = stream.getVideoTracks()[0];
+        if (!track) return;
+        try {
+            await (track as any).applyConstraints({
+                advanced: [{ torch: !torchOn }],
+            });
+            setTorchOn(!torchOn);
+        } catch (e) {
+            console.warn('Torch constraint toggle failed:', e);
+        }
+    };
+
     // Barcode Detection Loop
     useEffect(() => {
         if (!isActive || !videoRef.current || !canvasRef.current) return;
@@ -61,8 +99,8 @@ export function CameraScanner({ onScanComplete, isLoading }: CameraScannerProps)
                             setDetectedBarcode(barcodes[0].rawValue);
                         }
                     }
-                } catch (e) {
-                    // Ignore errors (e.g. if video frame isn't ready)
+                } catch {
+                    // Ignore transient errors
                 }
             }, 1000);
         }
@@ -88,7 +126,7 @@ export function CameraScanner({ onScanComplete, isLoading }: CameraScannerProps)
             });
             setStream(mediaStream);
             setIsActive(true);
-        } catch (err: unknown) {
+        } catch {
             try {
                 const fallbackStream = await navigator.mediaDevices.getUserMedia({
                     video: { width: { ideal: 1280 }, height: { ideal: 720 } },
@@ -109,6 +147,7 @@ export function CameraScanner({ onScanComplete, isLoading }: CameraScannerProps)
             stream.getTracks().forEach((track) => track.stop());
             setStream(null);
             setIsActive(false);
+            setTorchOn(false);
         }
     }, [stream]);
 
@@ -127,7 +166,7 @@ export function CameraScanner({ onScanComplete, isLoading }: CameraScannerProps)
             const ctx = canvas.getContext('2d');
             if (ctx) {
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                const base64 = canvas.toDataURL('image/jpeg', 0.85);
+                const base64 = canvas.toDataURL('image/jpeg', 0.88);
                 setCropTargetIndex(null);
                 setCropImageSrc(base64);
             }
@@ -142,6 +181,33 @@ export function CameraScanner({ onScanComplete, isLoading }: CameraScannerProps)
         }
         setCropImageSrc(null);
         setCropTargetIndex(null);
+    };
+
+    // Adobe Scan Sequential Flow: Crop & Next Panel
+    const handleCropAndNext = (croppedBase64: string) => {
+        if (cropTargetIndex !== null) {
+            setCapturedImages(prev => prev.map((img, i) => i === cropTargetIndex ? croppedBase64 : img));
+        } else {
+            setCapturedImages(prev => [...prev, croppedBase64]);
+        }
+        setCropImageSrc(null);
+        setCropTargetIndex(null);
+        // Remains in active viewfinder mode ready to snap next panel
+    };
+
+    // Adobe Scan Sequential Flow: Crop & Finish Audit
+    const handleCropAndFinish = (croppedBase64: string) => {
+        let finalDossier: string[];
+        if (cropTargetIndex !== null) {
+            finalDossier = capturedImages.map((img, i) => i === cropTargetIndex ? croppedBase64 : img);
+        } else {
+            finalDossier = [...capturedImages, croppedBase64];
+        }
+        setCapturedImages(finalDossier);
+        setCropImageSrc(null);
+        setCropTargetIndex(null);
+        stopCamera();
+        onScanComplete(finalDossier);
     };
 
     const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -168,7 +234,6 @@ export function CameraScanner({ onScanComplete, isLoading }: CameraScannerProps)
                 reader.readAsDataURL(file);
             });
         }
-        // Reset input so the same file can be uploaded again if needed
         e.target.value = '';
     };
 
@@ -178,13 +243,26 @@ export function CameraScanner({ onScanComplete, isLoading }: CameraScannerProps)
 
     const submitDossier = () => {
         if (capturedImages.length > 0) {
+            stopCamera();
             onScanComplete(capturedImages);
         }
     };
 
+    const currentPanelLabel = SURFACE_NAMES[capturedImages.length] || `Surface ${capturedImages.length + 1}`;
+
     return (
         <div className="flex flex-col gap-4 p-3 sm:p-5 bg-slate-900 rounded-xl border border-slate-800 text-slate-100 shadow-lg">
-            <div className="relative aspect-video bg-black rounded-lg overflow-hidden border border-slate-800 flex items-center justify-center group">
+            {/* Viewfinder Container:
+                - Desktop: Relative 16:9 container inside card
+                - Mobile (when active): Fixed full-screen CamScanner modal covering viewport
+            */}
+            <div
+                className={
+                    isActive
+                        ? "relative aspect-video bg-black rounded-lg overflow-hidden border border-slate-800 flex items-center justify-center group max-md:fixed max-md:inset-0 max-md:z-50 max-md:aspect-auto max-md:rounded-none max-md:border-none"
+                        : "relative aspect-video bg-black rounded-lg overflow-hidden border border-slate-800 flex items-center justify-center group"
+                }
+            >
                 <video
                     ref={videoRef}
                     className={`w-full h-full object-cover ${isActive ? 'block' : 'hidden'}`}
@@ -193,57 +271,160 @@ export function CameraScanner({ onScanComplete, isLoading }: CameraScannerProps)
                     muted
                 />
 
+                {/* --- MOBILE FULLSCREEN TOP BAR (CamScanner style) --- */}
+                {isActive && (
+                    <div className="md:hidden absolute top-0 inset-x-0 z-30 flex items-center justify-between px-4 py-3 bg-gradient-to-b from-black/85 via-black/50 to-transparent pt-safe pointer-events-auto">
+                        <button
+                            type="button"
+                            onClick={stopCamera}
+                            className="w-10 h-10 rounded-full bg-black/60 text-white flex items-center justify-center border border-white/20 active:scale-95 shadow-md cursor-pointer"
+                            title="Close Viewfinder"
+                        >
+                            <X className="w-5 h-5" />
+                        </button>
+
+                        <div className="flex flex-col items-center">
+                            <span className="px-3 py-1 bg-black/70 border border-emerald-500/50 text-emerald-300 text-xs font-mono font-bold rounded-full backdrop-blur-md shadow-md">
+                                Panel {capturedImages.length + 1} of 3 ({currentPanelLabel})
+                            </span>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                            {supportsTorch && (
+                                <button
+                                    type="button"
+                                    onClick={toggleTorch}
+                                    className={`w-10 h-10 rounded-full flex items-center justify-center border active:scale-95 transition-all shadow-md cursor-pointer ${
+                                        torchOn ? 'bg-amber-400 text-slate-950 border-amber-300' : 'bg-black/60 text-white border-white/20'
+                                    }`}
+                                    title={torchOn ? 'Turn Off Flash' : 'Turn On Flash'}
+                                >
+                                    <Zap className="w-5 h-5" />
+                                </button>
+                            )}
+                            <button
+                                type="button"
+                                onClick={flipCamera}
+                                className="w-10 h-10 rounded-full bg-black/60 text-white flex items-center justify-center border border-white/20 active:scale-95 shadow-md cursor-pointer"
+                                title="Flip camera (Front / Rear)"
+                            >
+                                <FlipHorizontal className="w-5 h-5" />
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {/* --- OPTICAL RETICLE & FRAMING GUIDES --- */}
                 {isActive && (
                     <div className="absolute inset-0 pointer-events-none">
                         {/* AR Reticle / Framing Guide */}
-                        <svg className="w-full h-full absolute inset-0 text-emerald-500 opacity-60" xmlns="http://www.w3.org/2000/svg">
-                            <rect x="10%" y="10%" width="80%" height="80%" fill="none" stroke="currentColor" strokeWidth="2" strokeDasharray="15, 15" />
+                        <svg className="w-full h-full absolute inset-0 text-emerald-400 opacity-65" xmlns="http://www.w3.org/2000/svg">
+                            <rect x="12%" y="15%" width="76%" height="70%" fill="none" stroke="currentColor" strokeWidth="1.5" strokeDasharray="12, 12" />
                             {/* Corners */}
-                            <path d="M 10% 20% L 10% 10% L 20% 10%" fill="none" stroke="currentColor" strokeWidth="4" />
-                            <path d="M 80% 10% L 90% 10% L 90% 20%" fill="none" stroke="currentColor" strokeWidth="4" />
-                            <path d="M 90% 80% L 90% 90% L 80% 90%" fill="none" stroke="currentColor" strokeWidth="4" />
-                            <path d="M 20% 90% L 10% 90% L 10% 80%" fill="none" stroke="currentColor" strokeWidth="4" />
+                            <path d="M 12% 22% L 12% 15% L 19% 15%" fill="none" stroke="currentColor" strokeWidth="3.5" />
+                            <path d="M 81% 15% L 88% 15% L 88% 22%" fill="none" stroke="currentColor" strokeWidth="3.5" />
+                            <path d="M 88% 78% L 88% 85% L 81% 85%" fill="none" stroke="currentColor" strokeWidth="3.5" />
+                            <path d="M 19% 85% L 12% 85% L 12% 78%" fill="none" stroke="currentColor" strokeWidth="3.5" />
                         </svg>
                         
                         {/* Center HUD */}
                         <div className="absolute inset-0 flex items-center justify-center">
-                            <div className="w-12 h-12 border border-emerald-500/50 rounded-full flex items-center justify-center animate-pulse">
-                                <div className="w-1 h-1 bg-emerald-500 rounded-full"></div>
+                            <div className="w-14 h-14 border border-emerald-400/40 rounded-full flex items-center justify-center animate-pulse">
+                                <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full shadow-[0_0_8px_#34d399]"></div>
                             </div>
                         </div>
 
-                        {/* Top HUD text */}
-                        <div className="absolute top-4 left-4 flex flex-col gap-1 drop-shadow-md">
-                            <div className="text-xs font-mono text-emerald-400 bg-black/40 px-2 py-0.5 rounded backdrop-blur-sm">
+                        {/* Top HUD text (Desktop only) */}
+                        <div className="hidden md:flex absolute top-4 left-4 flex-col gap-1 drop-shadow-md">
+                            <div className="text-xs font-mono text-emerald-400 bg-black/50 px-2 py-0.5 rounded backdrop-blur-sm">
                                 [FOV: STANDARD]
                             </div>
-                            <div className="text-xs font-mono text-emerald-400 bg-black/40 px-2 py-0.5 rounded backdrop-blur-sm">
+                            <div className="text-xs font-mono text-emerald-400 bg-black/50 px-2 py-0.5 rounded backdrop-blur-sm">
                                 [SURFACE: {capturedImages.length === 0 ? 'FRONT PDP' : `SIDE ${capturedImages.length + 1}`}]
                             </div>
                         </div>
 
                         {/* Barcode Detection Toast */}
                         {detectedBarcode && (
-                            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-xs font-mono text-black bg-emerald-400 px-3 py-1.5 rounded flex items-center gap-2 drop-shadow-md shadow-emerald-500/50 shadow-lg">
-                                <Box className="w-4 h-4" /> EAN-13 DETECTED: {detectedBarcode}
+                            <div className="absolute bottom-24 md:bottom-4 left-1/2 -translate-x-1/2 text-xs font-mono text-black bg-emerald-400 px-3 py-1.5 rounded-full flex items-center gap-2 drop-shadow-md shadow-emerald-500/50 shadow-lg pointer-events-auto">
+                                <Box className="w-4 h-4" /> EAN-13: {detectedBarcode}
                             </div>
                         )}
                     </div>
                 )}
 
+                {/* --- MOBILE FULLSCREEN SHUTTER BAR (Adobe Scan style) --- */}
+                {isActive && (
+                    <div className="md:hidden absolute bottom-0 inset-x-0 z-30 flex items-center justify-between px-6 py-6 bg-gradient-to-t from-black/95 via-black/70 to-transparent pb-safe pointer-events-auto">
+                        {/* Left: Thumbnail stack preview */}
+                        <div className="w-16 h-16 flex items-center justify-start">
+                            {capturedImages.length > 0 ? (
+                                <div className="relative w-14 h-14 rounded-lg overflow-hidden border-2 border-white/80 shadow-lg">
+                                    <img
+                                        src={capturedImages[capturedImages.length - 1]}
+                                        alt="Last captured panel"
+                                        className="w-full h-full object-cover"
+                                    />
+                                    <div className="absolute top-0 right-0 bg-emerald-500 text-slate-950 text-[10px] font-mono font-black w-4 h-4 rounded-bl flex items-center justify-center">
+                                        {capturedImages.length}
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="w-14 h-14 rounded-lg border border-white/20 flex items-center justify-center text-white/40 text-[10px] text-center font-mono leading-tight">
+                                    No Panels
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Center: Large Tactile Shutter Button */}
+                        <button
+                            type="button"
+                            onClick={captureFrame}
+                            className="relative w-20 h-20 rounded-full border-4 border-white flex items-center justify-center active:scale-90 transition-transform shadow-2xl cursor-pointer"
+                            aria-label="Capture Package Panel"
+                        >
+                            <div className="w-16 h-16 rounded-full bg-white active:bg-emerald-400 transition-colors shadow-inner flex items-center justify-center">
+                                <Camera className="w-6 h-6 text-slate-900" />
+                            </div>
+                        </button>
+
+                        {/* Right: Finish & Inspect Button */}
+                        <div className="w-16 h-16 flex items-center justify-end">
+                            {capturedImages.length > 0 ? (
+                                <button
+                                    type="button"
+                                    onClick={submitDossier}
+                                    disabled={isLoading}
+                                    className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white text-xs font-bold rounded-lg shadow-lg flex flex-col items-center leading-tight transition-transform cursor-pointer"
+                                >
+                                    <Send className="w-4 h-4 mb-0.5" />
+                                    <span>Inspect ({capturedImages.length})</span>
+                                </button>
+                            ) : (
+                                <div className="w-16" />
+                            )}
+                        </div>
+                    </div>
+                )}
+
+                {/* Inactive Camera Offline State */}
                 {!isActive && (
                     <div className="text-slate-500 flex flex-col items-center text-center p-4">
                         <CameraOff className="w-12 h-12 mb-2 opacity-40 text-slate-400" />
                         <p className="text-sm font-medium">Camera Feed Offline</p>
+                        <p className="text-xs text-slate-500 mt-1 max-w-xs">
+                            Launch live camera viewfinder to capture packaging evidence panels under Section 36.
+                        </p>
                     </div>
                 )}
 
+                {/* Desktop Camera Flip Button */}
                 {isActive && (
                     <button
                         type="button"
                         onClick={flipCamera}
                         title="Flip camera (front / rear)"
-                        className="absolute top-4 right-4 flex items-center gap-1.5 px-3 py-1.5 bg-black/65 hover:bg-black/85 rounded-full text-white backdrop-blur-sm transition-all shadow-md cursor-pointer z-10 text-xs font-semibold"
+                        className="hidden md:flex absolute top-4 right-4 items-center gap-1.5 px-3 py-1.5 bg-black/65 hover:bg-black/85 rounded-full text-white backdrop-blur-sm transition-all shadow-md cursor-pointer z-10 text-xs font-semibold"
                     >
                         <FlipHorizontal className="w-4 h-4" />
                         <span>{facingMode === 'user' ? 'Front Cam' : 'Rear Cam'}</span>
@@ -253,12 +434,12 @@ export function CameraScanner({ onScanComplete, isLoading }: CameraScannerProps)
                 <canvas ref={canvasRef} className="hidden" />
             </div>
 
-            {/* Captured Dossier Ribbon */}
+            {/* Captured Dossier Ribbon (Desktop & Mobile Inactive) */}
             {capturedImages.length > 0 && (
                 <div className="flex flex-col gap-2 bg-slate-800/50 p-3 rounded-lg border border-slate-700">
                     <div className="text-xs font-semibold text-slate-400 flex justify-between items-center">
                         <span>PACKAGE DOSSIER ({capturedImages.length})</span>
-                        <span className="text-emerald-400">Multi-Surface Analysis Active</span>
+                        <span className="text-emerald-400 font-mono text-[11px]">Multi-Surface Analysis Ready</span>
                     </div>
                     <div className="flex gap-2 overflow-x-auto pb-2 custom-scrollbar">
                         {capturedImages.map((img, idx) => (
@@ -300,17 +481,18 @@ export function CameraScanner({ onScanComplete, isLoading }: CameraScannerProps)
                 </p>
             )}
 
+            {/* Standard Action Strip (Desktop + Inactive Mobile) */}
             <div className="flex flex-col sm:flex-row flex-wrap gap-2.5 sm:gap-3 justify-center items-stretch sm:items-center">
                 {!isActive ? (
                     <button
                         type="button"
                         onClick={() => startCamera()}
-                        className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-semibold transition cursor-pointer shadow-xs"
+                        className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-semibold transition cursor-pointer shadow-xs active:scale-95"
                     >
                         <Camera className="w-4 h-4" /> Start Camera
                     </button>
                 ) : (
-                    <div className="flex gap-2 flex-1">
+                    <div className="hidden md:flex gap-2 flex-1">
                         <button
                             type="button"
                             onClick={captureFrame}
@@ -329,7 +511,7 @@ export function CameraScanner({ onScanComplete, isLoading }: CameraScannerProps)
                     </div>
                 )}
 
-                <label className="flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-sm font-medium transition cursor-pointer border border-slate-700">
+                <label className="flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-sm font-medium transition cursor-pointer border border-slate-700 active:scale-95">
                     <Upload className="w-4 h-4" /> Upload
                     <input type="file" accept="image/*" multiple onChange={handleFileUpload} className="hidden" />
                 </label>
@@ -339,18 +521,22 @@ export function CameraScanner({ onScanComplete, isLoading }: CameraScannerProps)
                         type="button"
                         onClick={submitDossier}
                         disabled={isLoading}
-                        className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-900 text-white rounded-lg text-sm font-bold transition shadow-xs sm:ml-auto cursor-pointer"
+                        className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-900 text-white rounded-lg text-sm font-bold transition shadow-xs sm:ml-auto cursor-pointer active:scale-95"
                     >
                         {isLoading ? <RefreshCcw className="w-4 h-4 animate-spin" /> : <><Send className="w-4 h-4" /> Submit Dossier ({capturedImages.length})</>}
                     </button>
                 )}
             </div>
 
+            {/* Interactive Crop Modal (Sequential Flow) */}
             <ImageCropModal
                 isOpen={cropImageSrc !== null}
                 imageSrc={cropImageSrc || ''}
                 title={cropTargetIndex !== null ? `Crop Surface ${cropTargetIndex + 1}` : `Crop Captured Surface ${capturedImages.length + 1}`}
+                panelLabel={cropTargetIndex !== null ? `Surface ${cropTargetIndex + 1}` : currentPanelLabel}
                 onConfirmCrop={handleCropConfirmed}
+                onConfirmCropAndNext={handleCropAndNext}
+                onConfirmCropAndFinish={handleCropAndFinish}
                 onCancel={() => {
                     setCropImageSrc(null);
                     setCropTargetIndex(null);

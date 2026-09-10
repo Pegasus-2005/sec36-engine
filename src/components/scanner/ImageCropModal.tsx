@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Crop, Check, X, Maximize2, RotateCcw, BoxSelect } from 'lucide-react';
+import { Crop, Check, X, Maximize2, RotateCcw, BoxSelect, Plus, ArrowRight } from 'lucide-react';
 
 export interface CropBox {
   x: number; // percentage [0, 100]
@@ -15,7 +15,10 @@ interface ImageCropModalProps {
   imageSrc: string;
   title?: string;
   onConfirmCrop: (croppedBase64: string) => void;
+  onConfirmCropAndNext?: (croppedBase64: string) => void;
+  onConfirmCropAndFinish?: (croppedBase64: string) => void;
   onCancel: () => void;
+  panelLabel?: string;
 }
 
 const DEFAULT_CROP: CropBox = { x: 2, y: 2, w: 96, h: 96 };
@@ -25,7 +28,10 @@ export function ImageCropModal({
   imageSrc,
   title = 'Crop Packaging Evidence',
   onConfirmCrop,
+  onConfirmCropAndNext,
+  onConfirmCropAndFinish,
   onCancel,
+  panelLabel,
 }: ImageCropModalProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
@@ -186,15 +192,14 @@ export function ImageCropModal({
   }, [dragState, displaySize]);
 
   // Execute precise pixel slice from the natural image
-  const applyCrop = () => {
-    if (!imgRef.current) return;
+  const getCroppedData = (): string => {
+    if (!imgRef.current) return imageSrc;
     const img = imgRef.current;
     const naturalW = img.naturalWidth;
     const naturalH = img.naturalHeight;
 
     if (!naturalW || !naturalH) {
-      onConfirmCrop(imageSrc);
-      return;
+      return imageSrc;
     }
 
     const clampedX = Math.max(0, Math.min(100, crop.x));
@@ -208,8 +213,7 @@ export function ImageCropModal({
     const sourceH = Math.round((clampedH / 100) * naturalH);
 
     if (sourceW <= 0 || sourceH <= 0) {
-      onConfirmCrop(imageSrc);
-      return;
+      return imageSrc;
     }
 
     const canvas = document.createElement('canvas');
@@ -217,16 +221,34 @@ export function ImageCropModal({
     canvas.height = sourceH;
     const ctx = canvas.getContext('2d');
     if (!ctx) {
-      onConfirmCrop(imageSrc);
-      return;
+      return imageSrc;
     }
 
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(img, sourceX, sourceY, sourceW, sourceH, 0, 0, sourceW, sourceH);
 
-    const croppedData = canvas.toDataURL('image/jpeg', 0.92);
-    onConfirmCrop(croppedData);
+    return canvas.toDataURL('image/jpeg', 0.92);
+  };
+
+  const handleApplyCrop = () => {
+    onConfirmCrop(getCroppedData());
+  };
+
+  const handleCropAndNext = () => {
+    if (onConfirmCropAndNext) {
+      onConfirmCropAndNext(getCroppedData());
+    } else {
+      handleApplyCrop();
+    }
+  };
+
+  const handleCropAndFinish = () => {
+    if (onConfirmCropAndFinish) {
+      onConfirmCropAndFinish(getCroppedData());
+    } else {
+      handleApplyCrop();
+    }
   };
 
   if (!isOpen) return null;
@@ -244,6 +266,11 @@ export function ImageCropModal({
           <div className="flex items-center gap-2 text-white">
             <Crop className="w-4 h-4 text-amber-400" />
             <h3 className="font-bold text-sm tracking-wide">{title}</h3>
+            {panelLabel && (
+              <span className="text-[11px] bg-amber-500/20 text-amber-300 font-mono font-bold px-2 py-0.5 rounded-full border border-amber-400/30">
+                {panelLabel}
+              </span>
+            )}
             <span className="hidden sm:inline-block text-[11px] text-slate-400 font-mono">
               [Crop out background table / isolate package panel]
             </span>
@@ -264,32 +291,25 @@ export function ImageCropModal({
             <span className="text-slate-400 text-[11px] font-semibold mr-1">Presets:</span>
             <button
               type="button"
-              onClick={() => setCrop({ x: 0, y: 0, w: 100, h: 100 })}
-              className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-[11px] font-mono cursor-pointer transition-colors whitespace-nowrap"
-            >
-              Full Frame
-            </button>
-            <button
-              type="button"
               onClick={() => setCrop({ x: 5, y: 2, w: 90, h: 58 })}
               className="px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded text-[11px] font-mono font-semibold cursor-pointer transition-colors whitespace-nowrap"
               title="Isolates package held or placed on top of a table/desk"
             >
-              Top 60% (Product on Table)
+              Auto-Detect Edges
             </button>
             <button
               type="button"
-              onClick={() => setCrop({ x: 12.5, y: 12.5, w: 75, h: 75 })}
+              onClick={() => setCrop({ x: 15, y: 15, w: 70, h: 70 })}
               className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-[11px] font-mono cursor-pointer transition-colors whitespace-nowrap"
             >
-              Center 75%
+              Tight Center
             </button>
             <button
               type="button"
-              onClick={() => setCrop({ x: 5, y: 38, w: 90, h: 58 })}
+              onClick={() => setCrop({ x: 0, y: 0, w: 100, h: 100 })}
               className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-[11px] font-mono cursor-pointer transition-colors whitespace-nowrap"
             >
-              Bottom 60%
+              Full Frame
             </button>
             <button
               type="button"
@@ -385,8 +405,8 @@ export function ImageCropModal({
                   <div className="border-r border-b border-amber-300" />
                   <div className="border-r border-b border-amber-300" />
                   <div className="border-b border-amber-300" />
-                  <div className="border-r border-amber-300" />
-                  <div className="border-r border-amber-300" />
+                  <div className="border-r border-b border-amber-300" />
+                  <div className="border-r border-b border-amber-300" />
                   <div />
                 </div>
 
@@ -476,33 +496,68 @@ export function ImageCropModal({
         </div>
 
         {/* Modal Footer Controls */}
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5 px-4 sm:px-6 py-3 bg-slate-900 border-t border-slate-800 pb-safe shrink-0">
-          <button
-            type="button"
-            onClick={() => onConfirmCrop(imageSrc)}
-            className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded transition-colors cursor-pointer"
-          >
-            <Maximize2 className="w-3.5 h-3.5" />
-            Keep Full Uncropped Image
-          </button>
+        <div className="px-4 sm:px-6 py-3 bg-slate-900 border-t border-slate-800 pb-safe shrink-0">
+          {/* Mobile Action Bar (Adobe Scan / CamScanner sequential flow) */}
+          {onConfirmCropAndNext ? (
+            <div className="flex items-center gap-2 w-full">
+              <button
+                type="button"
+                onClick={onCancel}
+                className="flex-1 flex items-center justify-center gap-1 px-3 py-2.5 text-xs font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 active:scale-95 rounded-lg transition-all cursor-pointer"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Retake</span>
+              </button>
 
-          <div className="w-full sm:w-auto flex items-center justify-end gap-2.5">
-            <button
-              type="button"
-              onClick={onCancel}
-              className="flex-1 sm:flex-initial px-4 py-2 text-xs font-semibold text-slate-400 hover:text-white transition-colors cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={applyCrop}
-              className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-6 py-2 text-xs font-bold bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950 rounded shadow-md transition-all cursor-pointer"
-            >
-              <Check className="w-4 h-4 stroke-[2.5]" />
-              Apply Crop &amp; Save
-            </button>
-          </div>
+              <button
+                type="button"
+                onClick={handleCropAndNext}
+                className="flex-1 flex items-center justify-center gap-1 px-3 py-2.5 text-xs font-bold text-amber-950 bg-amber-400 hover:bg-amber-300 active:scale-95 rounded-lg shadow-md transition-all cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+                <span>Crop &amp; Next</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleCropAndFinish}
+                className="flex-1 flex items-center justify-center gap-1 px-3 py-2.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 active:scale-95 rounded-lg shadow-md transition-all cursor-pointer"
+              >
+                <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                <span>Finish Audit</span>
+              </button>
+            </div>
+          ) : (
+            /* Desktop / Standard Action Bar */
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5">
+              <button
+                type="button"
+                onClick={() => onConfirmCrop(imageSrc)}
+                className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded transition-colors cursor-pointer"
+              >
+                <Maximize2 className="w-3.5 h-3.5" />
+                Keep Full Uncropped Image
+              </button>
+
+              <div className="w-full sm:w-auto flex items-center justify-end gap-2.5">
+                <button
+                  type="button"
+                  onClick={onCancel}
+                  className="flex-1 sm:flex-initial px-4 py-2 text-xs font-semibold text-slate-400 hover:text-white transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleApplyCrop}
+                  className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-6 py-2 text-xs font-bold bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950 rounded shadow-md transition-all cursor-pointer"
+                >
+                  <Check className="w-4 h-4 stroke-[2.5]" />
+                  Apply Crop &amp; Save
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

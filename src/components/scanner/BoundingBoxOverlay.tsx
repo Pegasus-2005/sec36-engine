@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef } from 'react';
-import { Eye, EyeOff, Ruler, Scale, Check, Info, Maximize } from 'lucide-react';
+import { Eye, EyeOff, Ruler, Scale, Check, Info, Maximize, Maximize2, X, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react';
 import { ExtractedDeclarations, ViolationRecord, BoundingBox } from '../../types/metrology';
 
 // ---------------------------------------------------------------------------
@@ -245,8 +245,11 @@ export function BoundingBoxOverlay({
   const [caliperEnd, setCaliperEnd] = useState<{ x: number; y: number } | null>(null);
   const [caliperActive, setCaliperActive] = useState(false);
   const [appliedFeedback, setAppliedFeedback] = useState(false);
+  const [precisionModalOpen, setPrecisionModalOpen] = useState(false);
+  const [precisionZoom, setPrecisionZoom] = useState(1.5);
   
   const svgRef = useRef<SVGSVGElement>(null);
+  const modalSvgRef = useRef<SVGSVGElement>(null);
 
   const entries = buildBoxEntries(declarations);
   const pdpBox = declarations?.package_pdp_box;
@@ -297,6 +300,43 @@ export function BoundingBoxOverlay({
     }
   };
 
+  const handleModalPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (!modalSvgRef.current) return;
+    const svg = modalSvgRef.current;
+    const pt = svg.createSVGPoint();
+    pt.x = e.clientX;
+    pt.y = e.clientY;
+    const cursorPt = pt.matrixTransform(svg.getScreenCTM()?.inverse());
+    if (cursorPt) {
+      setCaliperStart({ x: cursorPt.x, y: cursorPt.y });
+      setCaliperEnd({ x: cursorPt.x, y: cursorPt.y });
+      setCaliperActive(true);
+      setAppliedFeedback(false);
+      e.currentTarget.setPointerCapture(e.pointerId);
+    }
+  };
+
+  const handleModalPointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (!caliperActive || !modalSvgRef.current) return;
+    const svg = modalSvgRef.current;
+    const pt = svg.createSVGPoint();
+    pt.x = e.clientX;
+    pt.y = e.clientY;
+    const cursorPt = pt.matrixTransform(svg.getScreenCTM()?.inverse());
+    if (cursorPt) {
+      setCaliperEnd({ x: cursorPt.x, y: cursorPt.y });
+    }
+  };
+
+  const handleModalPointerUp = (e: React.PointerEvent<SVGSVGElement>) => {
+    setCaliperActive(false);
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      // ignore
+    }
+  };
+
   return (
     <div className="relative rounded-xl overflow-hidden border border-slate-700 bg-slate-900 flex flex-col">
       {/* Top action header: Surface Label, Micrometer & Overlay toggles */}
@@ -308,6 +348,21 @@ export function BoundingBoxOverlay({
         ) : <div />}
 
         <div className="flex items-center gap-2 pointer-events-auto">
+          {/* Mobile Precision Mode Trigger */}
+          <button
+            type="button"
+            onClick={() => {
+              setPrecisionModalOpen(true);
+              setCaliperMode(true);
+              setShowOverlay(true);
+            }}
+            title="Expand / Fullscreen Precision Mode"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold backdrop-blur-sm border transition-all duration-200 cursor-pointer bg-amber-950/80 border-amber-600/80 text-amber-300 hover:bg-amber-900/90 md:hidden"
+          >
+            <Maximize2 className="w-3.5 h-3.5" />
+            <span>Precision Mode</span>
+          </button>
+
           <button
             type="button"
             onClick={() => {
@@ -486,6 +541,240 @@ export function BoundingBoxOverlay({
               {appliedFeedback ? 'Applied to Official Audit!' : 'Apply Measurement to Rule 7 Audit'}
             </button>
           )}
+        </div>
+      )}
+
+      {/* ── Fullscreen Micrometer & Rule 7 Precision Calibrator Modal (Mobile) ──────── */}
+      {precisionModalOpen && (
+        <div className="fixed inset-0 z-[250] bg-slate-950 p-2 sm:p-4 flex flex-col text-slate-100 select-none animate-in fade-in duration-200">
+          {/* Top Bar: Controls & Statutory Readout */}
+          <div className="shrink-0 bg-slate-900 border border-slate-800 rounded-xl p-3 mb-2 shadow-lg flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400">
+                  <Ruler className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-bold text-slate-100 flex items-center gap-2">
+                    <span>Precision Mode · Rule 7 Calibrator</span>
+                    <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 font-mono font-bold border border-amber-500/30">
+                      {Math.round(precisionZoom * 100)}%
+                    </span>
+                  </h3>
+                  <p className="text-[10px] text-slate-400">Drag micrometer across letters to calibrate height</p>
+                </div>
+              </div>
+
+              {/* Zoom & Close controls */}
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setPrecisionZoom((z) => Math.max(1.0, Math.round((z - 0.25) * 100) / 100))}
+                  disabled={precisionZoom <= 1.0}
+                  className="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 flex items-center justify-center text-slate-300 cursor-pointer"
+                  title="Zoom Out"
+                >
+                  <ZoomOut className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPrecisionZoom((z) => Math.min(3.5, Math.round((z + 0.25) * 100) / 100))}
+                  disabled={precisionZoom >= 3.5}
+                  className="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 flex items-center justify-center text-slate-300 cursor-pointer"
+                  title="Zoom In"
+                >
+                  <ZoomIn className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPrecisionZoom(1.0)}
+                  className="px-2 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-[10px] font-mono text-slate-300 cursor-pointer"
+                  title="Reset Zoom (1x)"
+                >
+                  1x
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPrecisionModalOpen(false)}
+                  className="w-8 h-8 rounded-lg bg-slate-800 hover:bg-rose-900/80 hover:text-rose-200 flex items-center justify-center text-slate-400 cursor-pointer ml-1"
+                  title="Close Precision View"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Mini Readout: Active Ratio, Table 1 Threshold, Estimated Height in mm */}
+            <div className="flex items-center justify-between bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs font-mono">
+              <div className="flex items-center gap-2 sm:gap-4 flex-wrap text-[11px]">
+                <span>
+                  <span className="text-slate-400">Ratio: </span>
+                  <strong className="text-amber-400">{Math.round(ratio * 1000) / 10}% PDP</strong>
+                </span>
+                <span className="text-slate-700">|</span>
+                <span>
+                  <span className="text-slate-400">Table 1 Min: </span>
+                  <strong className="text-slate-200">{requiredMm} mm</strong>
+                </span>
+                <span className="text-slate-700">|</span>
+                <span>
+                  <span className="text-slate-400">Measured: </span>
+                  <strong className="text-amber-400">{measuredMm} mm</strong>
+                </span>
+              </div>
+
+              <span className={`px-2 py-0.5 rounded text-[10px] font-bold shrink-0 ${
+                isCompliant
+                  ? 'bg-emerald-950 text-emerald-300 border border-emerald-500'
+                  : 'bg-rose-950 text-rose-300 border border-rose-500'
+              }`}>
+                {isCompliant ? 'PASS' : 'FLAG'}
+              </span>
+            </div>
+          </div>
+
+          {/* Center: Zoomable & Pannable Canvas */}
+          <div className="flex-1 min-h-0 relative overflow-auto bg-black rounded-xl border border-slate-800 flex items-start justify-center touch-pan-x touch-pan-y p-2">
+            <div
+              className="relative transition-all duration-75 origin-top-center"
+              style={{
+                width: `${precisionZoom * 100}%`,
+                minWidth: '100%',
+              }}
+            >
+              <img
+                src={imageSrc}
+                alt="Precision Calibrator View"
+                className="w-full h-auto block select-none pointer-events-none"
+                draggable={false}
+              />
+
+              <svg
+                ref={modalSvgRef}
+                viewBox="0 0 1000 1000"
+                preserveAspectRatio="none"
+                className="absolute inset-0 w-full h-full touch-none select-none cursor-crosshair"
+                style={{ position: 'absolute', top: 0, left: 0, touchAction: 'none' }}
+                onPointerDown={handleModalPointerDown}
+                onPointerMove={handleModalPointerMove}
+                onPointerUp={handleModalPointerUp}
+              >
+                {/* SVG Bounding Boxes */}
+                {showOverlay && entries.map((entry, i) => (
+                  <BoxRect
+                    key={i}
+                    entry={entry}
+                    isViolated={isFieldViolated(violations, entry.citationPrefixes)}
+                  />
+                ))}
+
+                {/* Tactile Caliper Visuals with Finger Clearance */}
+                {caliperStart && caliperEnd && (
+                  <g>
+                    {/* Vertical Caliper Guide */}
+                    <line
+                      x1={caliperStart.x}
+                      y1={caliperStart.y}
+                      x2={caliperEnd.x}
+                      y2={caliperEnd.y}
+                      stroke="#f59e0b"
+                      strokeWidth="5"
+                    />
+
+                    {/* Top & Bottom T-Calipers */}
+                    <line
+                      x1={caliperStart.x - 36}
+                      y1={caliperStart.y}
+                      x2={caliperStart.x + 36}
+                      y2={caliperStart.y}
+                      stroke="#f59e0b"
+                      strokeWidth="3.5"
+                    />
+                    <line
+                      x1={caliperEnd.x - 36}
+                      y1={caliperEnd.y}
+                      x2={caliperEnd.x + 36}
+                      y2={caliperEnd.y}
+                      stroke="#f59e0b"
+                      strokeWidth="3.5"
+                    />
+
+                    {/* Large touch targets */}
+                    <circle cx={caliperStart.x} cy={caliperStart.y} r="12" fill="#f59e0b" stroke="#ffffff" strokeWidth="2.5" />
+                    <circle cx={caliperEnd.x} cy={caliperEnd.y} r="12" fill="#f59e0b" stroke="#ffffff" strokeWidth="2.5" />
+
+                    {/* Caliper HUD label offset to the right so fingers don't obscure it */}
+                    {(() => {
+                      const midX = (caliperStart.x + caliperEnd.x) / 2;
+                      const midY = (caliperStart.y + caliperEnd.y) / 2;
+                      const badgeX = Math.min(760, Math.max(20, midX + 35));
+                      const badgeY = Math.max(30, midY - 20);
+
+                      return (
+                        <g transform={`translate(${badgeX}, ${badgeY})`}>
+                          <rect
+                            x="0"
+                            y="-16"
+                            width="210"
+                            height="54"
+                            fill="rgba(2, 6, 23, 0.95)"
+                            rx="6"
+                            stroke="#f59e0b"
+                            strokeWidth="2"
+                          />
+                          <text x="12" y="5" fontSize="16" fontWeight="bold" fill="#f59e0b" fontFamily="monospace">
+                            ~{measuredMm} mm ({Math.round(ratio * 1000) / 10}%)
+                          </text>
+                          <text
+                            x="12"
+                            y="25"
+                            fontSize="11"
+                            fontWeight="bold"
+                            fill={isCompliant ? '#4ade80' : '#f87171'}
+                            fontFamily="sans-serif"
+                          >
+                            {isCompliant ? '✓ Satisfies Rule 7 (Table 1)' : '⚠️ Below Mandated Min Height'}
+                          </text>
+                        </g>
+                      );
+                    })()}
+                  </g>
+                )}
+              </svg>
+            </div>
+          </div>
+
+          {/* Bottom Bar: Action Buttons */}
+          <div className="shrink-0 pt-2 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                if (caliperStart && caliperEnd && caliperH > 5 && onApplyFontMeasurement) {
+                  onApplyFontMeasurement({ measuredMm, requiredMm, isCompliant, ratio });
+                  setAppliedFeedback(true);
+                  setTimeout(() => setAppliedFeedback(false), 3000);
+                }
+                setPrecisionModalOpen(false);
+              }}
+              className="flex-1 py-3.5 px-4 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2 shadow-lg cursor-pointer"
+            >
+              <Check className="w-4 h-4" />
+              <span>Save Calibration &amp; Return</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setCaliperStart(null);
+                setCaliperEnd(null);
+              }}
+              className="py-3.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 cursor-pointer"
+              title="Reset Caliper"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Reset</span>
+            </button>
+          </div>
         </div>
       )}
     </div>

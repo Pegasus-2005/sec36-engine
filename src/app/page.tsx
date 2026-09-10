@@ -658,13 +658,13 @@ export default function Dashboard() {
         <div className="flex items-center justify-between px-3.5 py-2.5">
           {/* Brand */}
           <div className="flex items-center gap-2.5">
-            <AshokaEmblem size={30} />
+            <AshokaEmblem size={28} />
             <div>
               <div className="flex items-center gap-1.5">
                 <span className="font-bold text-sm tracking-tight text-white leading-none">eMaap 2.0</span>
                 <span className="text-[9px] bg-emerald-500/30 text-emerald-300 font-mono font-bold px-1.5 py-0.5 rounded-xs border border-emerald-400/40 leading-none">SEC 36</span>
               </div>
-              <p className="text-[9px] text-blue-100/80 leading-tight mt-0.5">Dept. of Consumer Affairs · GoI</p>
+              <p className="text-[9px] text-blue-100/80 leading-tight mt-0.5 hidden md:block">Dept. of Consumer Affairs · GoI</p>
             </div>
           </div>
 
@@ -684,7 +684,7 @@ export default function Dashboard() {
               type="button"
               onClick={() => setMobileDrawerOpen(true)}
               className="flex items-center gap-1.5 bg-white/15 hover:bg-white/25 active:scale-95 text-white text-xs font-bold px-2 py-1 rounded-xs border border-white/20 transition-all cursor-pointer"
-              aria-label="Open Officer Menu"
+              aria-label="Open Officer Menu & Settings"
             >
               <div className="w-5 h-5 rounded-full bg-white text-[#0055A4] flex items-center justify-center text-[10px] font-black">
                 {officerInitials}
@@ -694,8 +694,8 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* 3-Tab Segment Selector (Fixed Header) */}
-        <div className="flex bg-[#004080] border-t border-white/10 text-xs font-semibold">
+        {/* 3-Tab Segment Selector (Visible on md to lg screens, hidden on < md in favor of fixed bottom nav) */}
+        <div className="hidden md:flex bg-[#004080] border-t border-white/10 text-xs font-semibold">
           <button
             type="button"
             onClick={() => {
@@ -1959,9 +1959,91 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* ── Mobile Bottom Navigation Bar (< md) ────────────────── */}
+      <nav
+        className="fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-300 py-1.5 flex justify-around items-center shadow-[0_-4px_16px_rgba(0,0,0,0.08)] md:hidden select-none"
+        aria-label="Mobile Navigation"
+      >
+        {/* Tab 1: Surveillance */}
+        <button
+          type="button"
+          onClick={() => {
+            setMainView('terminal');
+            setMobileTab('surveillance');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+          className={`flex-1 flex flex-col items-center justify-center py-1 transition-all cursor-pointer ${
+            mainView === 'terminal' && mobileTab === 'surveillance'
+              ? 'text-[#0055A4] font-bold'
+              : 'text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <div className="relative">
+            <Camera className={`w-5 h-5 ${mainView === 'terminal' && mobileTab === 'surveillance' ? 'stroke-[2.5]' : 'stroke-[1.75]'}`} />
+            {capturedImages.length > 0 && (
+              <span className="absolute -top-1.5 -right-2.5 min-w-4 h-4 px-1 rounded-full bg-[#0055A4] text-white text-[9px] font-mono font-bold flex items-center justify-center">
+                {capturedImages.length}
+              </span>
+            )}
+          </div>
+          <span className="text-[10px] mt-0.5 tracking-tight">Surveillance</span>
+        </button>
+
+        {/* Tab 2: Statutory Audit */}
+        <button
+          type="button"
+          onClick={() => {
+            setMainView('terminal');
+            setMobileTab('audit');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+          className={`flex-1 flex flex-col items-center justify-center py-1 transition-all cursor-pointer ${
+            mainView === 'terminal' && mobileTab === 'audit'
+              ? 'text-[#0055A4] font-bold'
+              : 'text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <div className="relative">
+            <Scale className={`w-5 h-5 ${mainView === 'terminal' && mobileTab === 'audit' ? 'stroke-[2.5]' : 'stroke-[1.75]'}`} />
+            {auditResult && (
+              <span className={`absolute -top-1.5 -right-3 min-w-3.5 h-3.5 px-1 rounded-full font-mono text-[8px] font-black text-white flex items-center justify-center ${
+                auditResult.overall_status === 'COMPLIANT' ? 'bg-emerald-600' : 'bg-red-600'
+              }`}>
+                {auditResult.overall_status === 'COMPLIANT' ? '✓' : '!'}
+              </span>
+            )}
+          </div>
+          <span className="text-[10px] mt-0.5 tracking-tight">Statutory Audit</span>
+        </button>
+
+        {/* Tab 3: Ledger */}
+        <button
+          type="button"
+          onClick={() => {
+            setMainView('repository');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+          className={`flex-1 flex flex-col items-center justify-center py-1 transition-all cursor-pointer ${
+            mainView === 'repository'
+              ? 'text-[#0055A4] font-bold'
+              : 'text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <div className="relative">
+            <Archive className={`w-5 h-5 ${mainView === 'repository' ? 'stroke-[2.5]' : 'stroke-[1.75]'}`} />
+            {docketHistory.length > 0 && (
+              <span className="absolute -top-1.5 -right-2.5 min-w-4 h-4 px-1 rounded-full bg-amber-500 text-slate-950 text-[9px] font-mono font-bold flex items-center justify-center">
+                {docketHistory.length}
+              </span>
+            )}
+          </div>
+          <span className="text-[10px] mt-0.5 tracking-tight">Ledger</span>
+        </button>
+      </nav>
+
       {/* ── GIGW 3.0 Certified Government Footer ────────────────────────── */}
       <footer style={{ backgroundColor: '#FFFFFF', borderTop: `1px solid ${NIC_BORDER}` }}>
-        <div className="px-4 py-4 sm:px-6 sm:py-6 space-y-3 max-w-7xl mx-auto">
+        <div className="px-4 py-4 sm:px-6 sm:py-6 pb-24 md:pb-6 space-y-3 max-w-7xl mx-auto">
           {/* Top row with Logos & Certifications */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 pb-4">
             <div className="flex items-center gap-3">
