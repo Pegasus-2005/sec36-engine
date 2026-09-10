@@ -20,7 +20,7 @@ export function StatutorySearch() {
   }, [query]);
 
   return (
-    <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end">
+    <div className="hidden lg:flex fixed bottom-6 right-6 z-40 flex flex-col items-end">
       {isOpen && (
         <div 
           className="mb-4 w-96 max-h-[500px] flex flex-col bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom-5"

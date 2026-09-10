@@ -38,6 +38,9 @@ import {
   Volume2,
   VolumeX,
   Layers,
+  Menu,
+  Archive,
+  LogOut,
 } from 'lucide-react';
 
 // ---------------------------------------------------------------------------
@@ -202,6 +205,7 @@ export default function Dashboard() {
   const [activeDossierIndex, setActiveDossierIndex] = useState(0);
   const [uploadCropSrc, setUploadCropSrc] = useState<string | null>(null);
   const [mobileTab, setMobileTab] = useState<'surveillance' | 'audit'>('surveillance');
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ── Dynamic Officer Identity State ──────────────────────────────
@@ -598,17 +602,124 @@ export default function Dashboard() {
       {/* ── Tricolor strip ──────────────────────────────────────────────── */}
       <div className="nic-header-accent" />
 
-      {/* ── Utility bar (GIGW 3.0 Accessibility & Rajbhasha Compliance) ───── */}
+      {/* ── Mobile Native App Bar (Visible on < lg screens) ────────────────── */}
+      <div className="lg:hidden sticky top-0 z-40 bg-[#0055A4] text-white shadow-md">
+        <div className="flex items-center justify-between px-3.5 py-2.5">
+          {/* Brand */}
+          <div className="flex items-center gap-2.5">
+            <AshokaEmblem size={30} />
+            <div>
+              <div className="flex items-center gap-1.5">
+                <span className="font-bold text-sm tracking-tight text-white leading-none">eMaap 2.0</span>
+                <span className="text-[9px] bg-emerald-500/30 text-emerald-300 font-mono font-bold px-1.5 py-0.5 rounded-xs border border-emerald-400/40 leading-none">SEC 36</span>
+              </div>
+              <p className="text-[9px] text-blue-100/80 leading-tight mt-0.5">Dept. of Consumer Affairs · GoI</p>
+            </div>
+          </div>
+
+          {/* Quick Controls: Mode Badge + Drawer Menu */}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsDemoMode(!isDemoMode)}
+              className="text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 bg-white/15 text-white border border-white/20 active:scale-95 transition-all cursor-pointer"
+              title="Toggle Live Cloud AI vs Offline Demo"
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${isDemoMode ? 'bg-amber-400' : 'bg-emerald-400 animate-pulse'}`} />
+              <span>{isDemoMode ? 'Demo' : 'Live AI'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setMobileDrawerOpen(true)}
+              className="flex items-center gap-1.5 bg-white/15 hover:bg-white/25 active:scale-95 text-white text-xs font-bold px-2 py-1 rounded-xs border border-white/20 transition-all cursor-pointer"
+              aria-label="Open Officer Menu"
+            >
+              <div className="w-5 h-5 rounded-full bg-white text-[#0055A4] flex items-center justify-center text-[10px] font-black">
+                {officerInitials}
+              </div>
+              <Menu className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+
+        {/* 3-Tab Segment Selector (Fixed Header) */}
+        <div className="flex bg-[#004080] border-t border-white/10 text-xs font-semibold">
+          <button
+            type="button"
+            onClick={() => {
+              setMainView('terminal');
+              setMobileTab('surveillance');
+            }}
+            className={`flex-1 py-2 text-center transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+              mainView === 'terminal' && mobileTab === 'surveillance'
+                ? 'bg-white text-[#0055A4] font-bold shadow-xs'
+                : 'text-blue-100 hover:bg-white/5'
+            }`}
+          >
+            <Camera className="w-3.5 h-3.5" />
+            <span>Surveillance</span>
+            {capturedImages.length > 0 && (
+              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-[#0055A4] text-white font-mono font-bold">
+                {capturedImages.length}
+              </span>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setMainView('terminal');
+              setMobileTab('audit');
+            }}
+            className={`flex-1 py-2 text-center transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+              mainView === 'terminal' && mobileTab === 'audit'
+                ? 'bg-white text-[#0055A4] font-bold shadow-xs'
+                : 'text-blue-100 hover:bg-white/5'
+            }`}
+          >
+            <Scale className="w-3.5 h-3.5" />
+            <span>Statutory Audit</span>
+            {auditResult && (
+              <span className={`text-[9px] px-1.5 py-0.2 rounded-full font-mono font-black text-white ${
+                auditResult.overall_status === 'COMPLIANT' ? 'bg-emerald-600' : 'bg-red-600'
+              }`}>
+                {auditResult.overall_status === 'COMPLIANT' ? 'PASS' : 'FLAG'}
+              </span>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setMainView('repository')}
+            className={`flex-1 py-2 text-center transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+              mainView === 'repository'
+                ? 'bg-white text-[#0055A4] font-bold shadow-xs'
+                : 'text-blue-100 hover:bg-white/5'
+            }`}
+          >
+            <Archive className="w-3.5 h-3.5" />
+            <span>Ledger</span>
+            {docketHistory.length > 0 && (
+              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-amber-400 text-slate-900 font-mono font-bold">
+                {docketHistory.length}
+              </span>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* ── Utility bar (GIGW 3.0 Accessibility & Rajbhasha Compliance) (DESKTOP ONLY) ───── */}
       <div
-        className="flex flex-wrap justify-between items-center px-3 sm:px-6 py-1.5 text-[11px] gap-2"
+        className="hidden lg:flex flex-wrap justify-between items-center px-6 py-1.5 text-[11px] gap-2"
         style={{ backgroundColor: NIC_BG, borderBottom: `1px solid ${NIC_BORDER}`, color: '#333333' }}
       >
-        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+        <div className="flex items-center gap-3">
           <span>
             <strong>{lang === 'hi' ? 'भारत सरकार' : 'Government of India'}</strong> &nbsp;·&nbsp;
             <span>{lang === 'hi' ? 'उपभोक्ता मामले विभाग' : 'Department of Consumer Affairs'}</span>
           </span>
-          <span className="hidden sm:inline" style={{ color: NIC_BORDER }}>|</span>
+          <span style={{ color: NIC_BORDER }}>|</span>
           {/* Live IST Clock */}
           <span className="font-mono text-[10px] text-slate-700 flex items-center gap-1.5 bg-slate-200/60 px-2 py-0.5 rounded-xs">
             <Clock className="w-3 h-3 text-[#0055A4]" />
@@ -616,7 +727,7 @@ export default function Dashboard() {
           </span>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+        <div className="flex items-center gap-3">
           <a href="#main" className="underline hover:no-underline text-[10px]">
             {lang === 'hi' ? 'मुख्य सामग्री पर जाएं' : 'Skip to Main Content'}
           </a>
@@ -682,22 +793,22 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* ── Branding header ─────────────────────────────────────────────── */}
+      {/* ── Branding header (DESKTOP ONLY) ─────────────────────────────── */}
       <header
-        className="px-3 sm:px-6 py-2.5 flex flex-col md:flex-row items-start md:items-center justify-between gap-3.5"
+        className="hidden lg:flex px-6 py-2.5 items-center justify-between"
         style={{ backgroundColor: '#FFFFFF', borderBottom: `1px solid ${NIC_BORDER}` }}
       >
         {/* Left: Emblem + brand text */}
-        <div className="flex items-center gap-3">
-          <AshokaEmblem size={44} />
+        <div className="flex items-center gap-3.5">
+          <AshokaEmblem size={46} />
           <div>
-            <p className="text-[9px] sm:text-[10px] text-slate-500 leading-snug font-semibold uppercase tracking-wider">
+            <p className="text-[10px] text-slate-500 leading-snug font-semibold uppercase tracking-wider">
               {lang === 'hi' ? 'उपभोक्ता मामले, खाद्य और सार्वजनिक वितरण मंत्रालय' : 'Ministry of Consumer Affairs, Food & Public Distribution'}
             </p>
-            <h1 className="text-base sm:text-lg font-bold leading-tight mt-0.5" style={{ color: NIC_BLUE }}>
+            <h1 className="text-lg font-bold leading-tight mt-0.5" style={{ color: NIC_BLUE }}>
               {lang === 'hi' ? 'उपभोक्ता मामले विभाग / ई-माप 2.0' : 'Department of Consumer Affairs / eMaap 2.0'}
             </h1>
-            <p className="text-[9px] sm:text-[10px] text-slate-500 mt-0.5">
+            <p className="text-[10px] text-slate-500 mt-0.5">
               {lang === 'hi'
                 ? 'राष्ट्रीय विधिक मापविज्ञान निगरानी एवं प्रवर्तन प्रणाली — नियमावली, 2011'
                 : 'National Inspection & Section 36 Enforcement Portal — Legal Metrology (Packaged Commodities) Rules, 2011'}
@@ -705,11 +816,11 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Right: Officer profile + controls in a responsive layout */}
-        <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 w-full md:w-auto justify-between md:justify-end">
+        {/* Right: Officer profile + controls in a sleek, compact layout */}
+        <div className="flex items-center gap-3">
           {/* Officer profile card */}
           <div
-            className="text-xs px-2.5 sm:px-3 py-1.5 flex items-center gap-2 sm:gap-2.5 border rounded-xs"
+            className="text-xs px-3 py-1.5 flex items-center gap-2.5 border rounded-xs"
             style={{ borderColor: NIC_BORDER, backgroundColor: NIC_BG }}
           >
             <div
@@ -810,17 +921,17 @@ export default function Dashboard() {
         </div>
       </header>
 
-      {/* ── Primary nav bar ─────────────────────────────────────────────── */}
+      {/* ── Primary nav bar (DESKTOP ONLY) ─────────────────────────────── */}
       <nav
-        className="px-3 sm:px-6 py-0 flex flex-wrap items-center justify-between text-sm font-medium gap-1"
+        className="hidden lg:flex px-6 py-0 items-center justify-between text-sm font-medium"
         style={{ backgroundColor: NIC_BLUE }}
         aria-label="Primary navigation"
       >
-        <div className="flex items-center overflow-x-auto">
+        <div className="flex items-center">
           {/* Tab 1 — Active Surveillance Terminal */}
           <button
             onClick={() => setMainView('terminal')}
-            className="px-3 sm:px-4 py-2.5 text-xs sm:text-sm font-medium transition-colors"
+            className="px-4 py-2.5 text-sm font-medium transition-colors"
             style={{
               color: '#FFFFFF',
               borderBottom: mainView === 'terminal' ? '3px solid #FFFFFF' : '3px solid transparent',
@@ -834,7 +945,7 @@ export default function Dashboard() {
           {/* Tab 2 — National Docket Repository */}
           <button
             onClick={() => setMainView('repository')}
-            className="px-3 sm:px-4 py-2.5 text-xs sm:text-sm font-medium transition-colors flex items-center gap-1.5 sm:gap-2"
+            className="px-4 py-2.5 text-sm font-medium transition-colors flex items-center gap-2"
             style={{
               color: '#FFFFFF',
               borderBottom: mainView === 'repository' ? '3px solid #FFFFFF' : '3px solid transparent',
@@ -861,16 +972,16 @@ export default function Dashboard() {
         {/* Right Side Nav Utility: Statutory Gazette Quick Reference */}
         <button
           onClick={() => setGazetteModalOpen(true)}
-          className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1 sm:py-1.5 my-1 bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold text-xs rounded-xs shadow-xs transition-colors"
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold text-xs rounded-xs shadow-xs transition-colors"
           title="Open Statutory Gazette Notifications and Acts reference"
         >
           <BookOpen className="w-3.5 h-3.5" />
-          <span>{lang === 'hi' ? 'राजपत्र संदर्भ' : 'Statutory Gazette'}</span>
+          <span>{lang === 'hi' ? 'राजपत्र अधिसूचनाएं (क़ानूनी संदर्भ)' : 'Statutory Gazette & Rulebook'}</span>
         </button>
       </nav>
 
       {/* ── Main workspace ──────────────────────────────────────────────── */}
-      <main id="main" className="flex-1 p-3 sm:p-5 md:p-6">
+      <main id="main" className="flex-1 p-2 sm:p-5 md:p-6">
 
         {/* Demo banner */}
         {isDemoMode && (
@@ -911,56 +1022,6 @@ export default function Dashboard() {
         {/* ── TERMINAL VIEW ──────────────────────────────────────────────── */}
         {mainView === 'terminal' && (
           <div>
-            {/* Mobile View Segmented Switcher (< lg) */}
-            <div className="lg:hidden flex rounded-xs border p-1 bg-white shadow-xs mb-4" style={{ borderColor: NIC_BORDER }}>
-              <button
-                type="button"
-                onClick={() => setMobileTab('surveillance')}
-                className="flex-1 py-2 text-xs font-bold rounded-xs flex items-center justify-center gap-1.5 transition-colors"
-                style={{
-                  backgroundColor: mobileTab === 'surveillance' ? NIC_BLUE : 'transparent',
-                  color: mobileTab === 'surveillance' ? '#FFFFFF' : '#475569',
-                }}
-              >
-                <Camera className="w-3.5 h-3.5" />
-                <span>1. Surveillance &amp; Evidence</span>
-                {capturedImages.length > 0 && (
-                  <span
-                    className="text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold"
-                    style={{
-                      backgroundColor: mobileTab === 'surveillance' ? 'rgba(255,255,255,0.25)' : '#E2E8F0',
-                      color: mobileTab === 'surveillance' ? '#FFFFFF' : '#1E293B',
-                    }}
-                  >
-                    {capturedImages.length}
-                  </span>
-                )}
-              </button>
-              <button
-                type="button"
-                onClick={() => setMobileTab('audit')}
-                className="flex-1 py-2 text-xs font-bold rounded-xs flex items-center justify-center gap-1.5 transition-colors"
-                style={{
-                  backgroundColor: mobileTab === 'audit' ? NIC_BLUE : 'transparent',
-                  color: mobileTab === 'audit' ? '#FFFFFF' : '#475569',
-                }}
-              >
-                <Scale className="w-3.5 h-3.5" />
-                <span>2. Statutory Audit</span>
-                {auditResult && (
-                  <span
-                    className="text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold"
-                    style={{
-                      backgroundColor: auditResult.overall_status === 'COMPLIANT' ? '#16A34A' : '#DC2626',
-                      color: '#FFFFFF',
-                    }}
-                  >
-                    {auditResult.overall_status === 'COMPLIANT' ? 'PASS' : 'FLAG'}
-                  </span>
-                )}
-              </button>
-            </div>
-
             <div className="grid lg:grid-cols-2 gap-5 items-start">
 
               {/* ══════════════════════════════════════════════════════════════
@@ -1615,48 +1676,279 @@ export default function Dashboard() {
         lang={lang}
       />
 
+      {/* ── Mobile Officer & Compliance Drawer (Mobile Only) ─────────────── */}
+      {mobileDrawerOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden flex">
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity"
+            onClick={() => setMobileDrawerOpen(false)}
+          />
+
+          {/* Drawer Content */}
+          <div className="relative ml-auto w-[85%] max-w-sm h-full bg-white shadow-2xl flex flex-col z-10 overflow-y-auto">
+            {/* Drawer Header */}
+            <div className="p-4 bg-[#0055A4] text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <AshokaEmblem size={28} />
+                <div>
+                  <h2 className="text-sm font-bold leading-tight">eMaap 2.0 Terminal</h2>
+                  <p className="text-[10px] text-blue-100">Officer Control Panel</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMobileDrawerOpen(false)}
+                className="p-1 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
+                aria-label="Close menu"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Officer Profile Card */}
+            <div className="p-4 border-b border-slate-200 bg-slate-50">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-full bg-[#0055A4] text-white flex items-center justify-center font-bold text-sm shadow-xs shrink-0">
+                  {officerInitials}
+                </div>
+                <div className="min-w-0">
+                  <p className="font-bold text-gray-900 text-sm truncate">{officerName}</p>
+                  <p className="text-[11px] text-gray-600 truncate">Inspector (Zone-4) · Circle 04</p>
+                  <p className="text-[10px] text-emerald-700 font-medium flex items-center gap-1 mt-0.5 truncate">
+                    <ShieldCheck className="w-3 h-3 shrink-0" /> Jan Parichay SSO · {officerEmail}
+                  </p>
+                </div>
+              </div>
+              <div className="mt-3 pt-2.5 border-t border-slate-200 flex items-center justify-between text-[11px] text-slate-600 font-mono">
+                <span className="flex items-center gap-1">
+                  <Clock className="w-3 h-3 text-[#0055A4]" /> IST Live
+                </span>
+                <span>{currentTime || 'IST Time'}</span>
+              </div>
+            </div>
+
+            {/* Controls Section */}
+            <div className="p-4 space-y-4 flex-1">
+              {/* Inspection Mode */}
+              <div>
+                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">
+                  Inspection AI Engine
+                </label>
+                <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-md">
+                  <button
+                    type="button"
+                    onClick={() => setIsDemoMode(false)}
+                    className={`py-2 px-2.5 rounded text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                      !isDemoMode
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <Wifi className="w-3.5 h-3.5" /> Live Cloud AI
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsDemoMode(true)}
+                    className={`py-2 px-2.5 rounded text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                      isDemoMode
+                        ? 'bg-amber-500 text-slate-950 shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <WifiOff className="w-3.5 h-3.5" /> Offline Demo
+                  </button>
+                </div>
+              </div>
+
+              {/* Voice HUD Toggle */}
+              <div>
+                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">
+                  Auditory Assistance
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = !voiceHudEnabled;
+                    setVoiceHudEnabled(next);
+                    if (next && 'speechSynthesis' in window) {
+                      window.speechSynthesis.cancel();
+                      const u = new SpeechSynthesisUtterance("Voice HUD activated.");
+                      window.speechSynthesis.speak(u);
+                    }
+                  }}
+                  className={`w-full py-2.5 px-3 rounded-md border text-xs font-bold flex items-center justify-between transition-colors cursor-pointer ${
+                    voiceHudEnabled
+                      ? 'bg-sky-50 border-sky-300 text-sky-800'
+                      : 'bg-white border-slate-200 text-slate-700'
+                  }`}
+                >
+                  <span className="flex items-center gap-2">
+                    {voiceHudEnabled ? <Volume2 className="w-4 h-4 text-sky-600" /> : <VolumeX className="w-4 h-4 text-slate-400" />}
+                    Audible Infraction HUD
+                  </span>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                    voiceHudEnabled ? 'bg-sky-600 text-white' : 'bg-slate-200 text-slate-600'
+                  }`}>
+                    {voiceHudEnabled ? 'ON' : 'OFF'}
+                  </span>
+                </button>
+              </div>
+
+              {/* Statutory Gazette Rulebook */}
+              <div>
+                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">
+                  Legal Metrology Law &amp; Gazette
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileDrawerOpen(false);
+                    setGazetteModalOpen(true);
+                  }}
+                  className="w-full py-2.5 px-3 bg-amber-50 border border-amber-300 text-amber-900 rounded-md text-xs font-bold flex items-center justify-between hover:bg-amber-100 transition-colors cursor-pointer"
+                >
+                  <span className="flex items-center gap-2">
+                    <BookOpen className="w-4 h-4 text-amber-700" />
+                    Statutory Gazette &amp; Rulebook
+                  </span>
+                  <ChevronRight className="w-4 h-4 text-amber-700" />
+                </button>
+              </div>
+
+              {/* Accessibility (GIGW 3.0) */}
+              <div>
+                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">
+                  Accessibility &amp; Display (GIGW 3.0)
+                </label>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between p-2 bg-slate-50 border border-slate-200 rounded-md">
+                    <span className="text-xs text-slate-700 font-medium">Text Size</span>
+                    <div className="flex gap-1">
+                      {(['sm', 'md', 'lg'] as const).map((sz) => (
+                        <button
+                          key={sz}
+                          type="button"
+                          onClick={() => setFontScale(sz)}
+                          className={`w-7 h-7 rounded text-xs font-bold transition-colors cursor-pointer ${
+                            fontScale === sz
+                              ? 'bg-[#0055A4] text-white'
+                              : 'bg-white border border-slate-300 text-slate-700'
+                          }`}
+                        >
+                          {sz === 'sm' ? 'A-' : sz === 'md' ? 'A' : 'A+'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between p-2 bg-slate-50 border border-slate-200 rounded-md">
+                    <span className="text-xs text-slate-700 font-medium">Sunlight Field Mode</span>
+                    <button
+                      type="button"
+                      onClick={() => setIsHighContrast(!isHighContrast)}
+                      className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-bold transition-colors cursor-pointer ${
+                        isHighContrast
+                          ? 'bg-slate-900 text-amber-400'
+                          : 'bg-white border border-slate-300 text-slate-700'
+                      }`}
+                    >
+                      {isHighContrast ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
+                      {isHighContrast ? 'High Contrast' : 'Standard'}
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between p-2 bg-slate-50 border border-slate-200 rounded-md">
+                    <span className="text-xs text-slate-700 font-medium">Portal Language</span>
+                    <div className="flex gap-1">
+                      {(['hi', 'en'] as const).map((lCode) => (
+                        <button
+                          key={lCode}
+                          type="button"
+                          onClick={() => setLang(lCode)}
+                          className={`px-2.5 py-1 rounded text-xs font-bold transition-colors cursor-pointer ${
+                            lang === lCode
+                              ? 'bg-[#0055A4] text-white'
+                              : 'bg-white border border-slate-300 text-slate-700'
+                          }`}
+                        >
+                          {lCode === 'hi' ? 'हिन्दी' : 'English'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Drawer Footer: Logout & Certifications */}
+            <div className="p-4 border-t border-slate-200 bg-slate-50 space-y-3">
+              <button
+                type="button"
+                onClick={() => {
+                  document.cookie = 'auth_token=; Max-Age=0; path=/;';
+                  if (typeof window !== 'undefined') {
+                    localStorage.removeItem('emaap_officer_name');
+                  }
+                  window.location.href = '/login';
+                }}
+                className="w-full py-2.5 px-3 bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 rounded-md text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer"
+              >
+                <LogOut className="w-4 h-4" />
+                <span>Secure Officer Logout</span>
+              </button>
+
+              <div className="text-[9px] text-slate-400 text-center space-y-0.5">
+                <p>National Informatics Centre (NIC) · GoI</p>
+                <p>STQC Certified GIGW 3.0 · WCAG 2.1 AA</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── GIGW 3.0 Certified Government Footer ────────────────────────── */}
       <footer style={{ backgroundColor: '#FFFFFF', borderTop: `1px solid ${NIC_BORDER}` }}>
-        <div className="px-6 py-6 space-y-3 max-w-7xl mx-auto">
+        <div className="px-4 py-4 sm:px-6 sm:py-6 space-y-3 max-w-7xl mx-auto">
           {/* Top row with Logos & Certifications */}
-          <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 pb-4">
             <div className="flex items-center gap-3">
-              <AshokaEmblem size={36} />
+              <AshokaEmblem size={32} />
               <div>
-                <p className="text-[10px] font-bold text-slate-800">
+                <p className="text-[10px] font-bold text-slate-800 leading-tight">
                   {lang === 'hi' ? 'विधिक मापविज्ञान प्रभाग, उपभोक्ता मामले विभाग' : 'Legal Metrology Division, Department of Consumer Affairs'}
                 </p>
-                <p className="text-[9px] text-slate-500">
+                <p className="text-[9px] text-slate-500 leading-tight mt-0.5">
                   {lang === 'hi' ? 'उपभोक्ता मामले, खाद्य और सार्वजनिक वितरण मंत्रालय, भारत सरकार' : 'Ministry of Consumer Affairs, Food & Public Distribution, Government of India'}
                 </p>
               </div>
             </div>
 
             {/* Certifications and Compliance Pills */}
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-100 border border-slate-300 rounded-xs text-[10px] font-semibold text-slate-700">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-100 border border-slate-300 rounded-xs text-[9px] font-semibold text-slate-700">
                 <ShieldCheck className="w-3 h-3 text-[#0055A4]" /> STQC Certified (GIGW 3.0)
               </span>
-              <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-100 border border-slate-300 rounded-xs text-[10px] font-semibold text-slate-700">
-                <CheckCircle className="w-3 h-3 text-emerald-600" /> WCAG 2.1 Level AA Compliant
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-100 border border-slate-300 rounded-xs text-[9px] font-semibold text-slate-700">
+                <CheckCircle className="w-3 h-3 text-emerald-600" /> WCAG 2.1 AA
               </span>
-              <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-50 border border-blue-200 rounded-xs text-[10px] font-bold text-[#0055A4]">
-                Digital India Initiative
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 border border-blue-200 rounded-xs text-[9px] font-bold text-[#0055A4]">
+                Digital India
               </span>
             </div>
           </div>
 
           {/* Links & Helplines */}
-          <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-600">
-            <div className="flex items-center gap-3 flex-wrap">
-              {['Website Policies', 'Privacy Policy', 'Hyperlinking Policy', 'Copyright Policy', 'Terms & Conditions', 'Accessibility Statement', 'Help'].map((item) => (
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[10px] text-slate-600">
+            <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+              {['Website Policies', 'Privacy Policy', 'Hyperlinking Policy', 'Copyright Policy', 'Terms & Conditions', 'Help'].map((item) => (
                 <a key={item} href="#" className="hover:underline hover:text-[#0055A4]">
                   {item}
                 </a>
               ))}
             </div>
 
-            <div className="flex items-center gap-3 font-semibold text-[10px]">
+            <div className="flex items-center gap-2 sm:gap-3 font-semibold text-[10px] flex-wrap">
               <span className="text-amber-800 bg-amber-50 px-2 py-0.5 border border-amber-200 rounded-xs">
                 {lang === 'hi' ? 'उपभोक्ता हेल्पलाइन: 1915' : 'National Consumer Helpline: 1915'}
               </span>
@@ -1664,12 +1956,12 @@ export default function Dashboard() {
             </div>
           </div>
 
-          <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between text-[9px] text-slate-400">
+          <div className="pt-2 border-t border-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-1 text-[9px] text-slate-400">
             <p>
-              © 2026 Department of Consumer Affairs, Government of India. Designed, Developed &amp; Hosted by <strong>National Informatics Centre (NIC)</strong>.
+              © 2026 Department of Consumer Affairs, Government of India. Designed &amp; Hosted by <strong>NIC</strong>.
             </p>
             <p className="font-mono">
-              Build Version 2.4.1 (LM-PC-2011) &nbsp;|&nbsp; Last Updated: 10 September 2026
+              Build Version 2.4.1 (LM-PC-2011) &nbsp;|&nbsp; 10 Sept 2026
             </p>
           </div>
         </div>

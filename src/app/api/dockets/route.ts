@@ -4,10 +4,76 @@ import path from 'path';
 
 const dbPath = path.join(process.cwd(), 'data', 'dockets.json');
 
+// Local serverless memory fallback cache
 let memoryDockets: any[] = [];
 
-// Ensure DB file exists or fall back to memory
+// Cloud Database Configuration (Vercel KV / Upstash Redis)
+const KV_URL = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
+const KV_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
+
+/** Fetch dockets from Cloud Database (Vercel KV / Upstash) if configured */
+async function getCloudDockets(): Promise<any[] | null> {
+  if (!KV_URL || !KV_TOKEN) return null;
+  try {
+    const res = await fetch(`${KV_URL}/get/sec36_dockets`, {
+      headers: { Authorization: `Bearer ${KV_TOKEN}` },
+      cache: 'no-store',
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data || data.result === null || data.result === undefined) return [];
+    const parsed = typeof data.result === 'string' ? JSON.parse(data.result) : data.result;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (err) {
+    console.warn('Cloud KV read error, falling back to local storage:', err);
+    return null;
+  }
+}
+
+/** Save dockets to Cloud Database (Vercel KV / Upstash) if configured */
+async function saveCloudDockets(dockets: any[]): Promise<boolean> {
+  if (!KV_URL || !KV_TOKEN) return false;
+  try {
+    const res = await fetch(`${KV_URL}/set/sec36_dockets`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${KV_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(JSON.stringify(dockets)),
+    });
+    return res.ok;
+  } catch (err) {
+    console.warn('Cloud KV write error:', err);
+    return false;
+  }
+}
+
+/** Clear all dockets from Cloud Database */
+async function clearCloudDockets(): Promise<boolean> {
+  if (!KV_URL || !KV_TOKEN) return false;
+  try {
+    const res = await fetch(`${KV_URL}/del/sec36_dockets`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${KV_TOKEN}` },
+    });
+    return res.ok;
+  } catch (err) {
+    console.warn('Cloud KV delete error:', err);
+    return false;
+  }
+}
+
+// Ensure DB exists and retrieve latest records across Cloud KV, local file, or memory
 async function getDockets(): Promise<any[]> {
+  // 1. Check Cloud Database first (synced across all mobile/laptop clients)
+  const cloudData = await getCloudDockets();
+  if (cloudData !== null) {
+    memoryDockets = cloudData;
+    return cloudData;
+  }
+
+  // 2. Fall back to local filesystem (localhost development)
   try {
     const data = await fs.readFile(dbPath, 'utf8');
     const parsed = JSON.parse(data);
@@ -25,7 +91,6 @@ async function getDockets(): Promise<any[]> {
       }
       return memoryDockets;
     }
-    // Return memory fallback on read-only environments
     return memoryDockets;
   }
 }
@@ -33,7 +98,11 @@ async function getDockets(): Promise<any[]> {
 export async function GET() {
   try {
     const dockets = await getDockets();
-    return NextResponse.json({ success: true, dockets });
+    return NextResponse.json({
+      success: true,
+      dockets,
+      storageMode: KV_URL ? 'cloud_kv' : 'local_file',
+    });
   } catch (error) {
     console.error('Error reading dockets DB:', error);
     return NextResponse.json({ success: true, dockets: memoryDockets });
@@ -51,14 +120,17 @@ export async function POST(request: Request) {
     dockets.unshift(docketData);
     memoryDockets = dockets;
     
-    // Attempt save to file (will succeed locally, caught on Vercel read-only lambda)
+    // 1. Persist to Cloud Database (real-time sync across mobile & laptop)
+    await saveCloudDockets(dockets);
+    
+    // 2. Persist to local filesystem when available
     try {
       await fs.writeFile(dbPath, JSON.stringify(dockets, null, 2), 'utf8');
-    } catch (fsErr) {
-      console.warn('Filesystem write bypassed on serverless environment; persisted in memory:', fsErr);
+    } catch {
+      // Handled gracefully on serverless read-only environments
     }
     
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, storageMode: KV_URL ? 'cloud_kv' : 'local_file' });
   } catch (error) {
     console.error('Error writing to dockets DB:', error);
     return NextResponse.json({ success: false, error: 'Failed to write to database' }, { status: 500 });
@@ -73,6 +145,7 @@ export async function DELETE(request: Request) {
 
     if (all === 'true') {
       memoryDockets = [];
+      await clearCloudDockets();
       try {
         await fs.writeFile(dbPath, '[]', 'utf8');
       } catch {
@@ -91,6 +164,8 @@ export async function DELETE(request: Request) {
       return docketId !== id;
     });
     memoryDockets = filtered;
+
+    await saveCloudDockets(filtered);
 
     try {
       await fs.writeFile(dbPath, JSON.stringify(filtered, null, 2), 'utf8');

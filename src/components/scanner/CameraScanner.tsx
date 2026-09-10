@@ -170,7 +170,7 @@ export function CameraScanner({ onScanComplete, isLoading }: CameraScannerProps)
     };
 
     return (
-        <div className="flex flex-col gap-4 p-5 bg-slate-900 rounded-xl border border-slate-800 text-slate-100 shadow-lg">
+        <div className="flex flex-col gap-4 p-3 sm:p-5 bg-slate-900 rounded-xl border border-slate-800 text-slate-100 shadow-lg">
             <div className="relative aspect-video bg-black rounded-lg overflow-hidden border border-slate-800 flex items-center justify-center group">
                 <video
                     ref={videoRef}
@@ -287,36 +287,36 @@ export function CameraScanner({ onScanComplete, isLoading }: CameraScannerProps)
                 </p>
             )}
 
-            <div className="flex flex-wrap gap-3 justify-center">
+            <div className="flex flex-col sm:flex-row flex-wrap gap-2.5 sm:gap-3 justify-center items-stretch sm:items-center">
                 {!isActive ? (
                     <button
                         type="button"
                         onClick={() => startCamera()}
-                        className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-semibold transition"
+                        className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-semibold transition cursor-pointer shadow-xs"
                     >
                         <Camera className="w-4 h-4" /> Start Camera
                     </button>
                 ) : (
-                    <>
+                    <div className="flex gap-2 flex-1">
                         <button
                             type="button"
                             onClick={captureFrame}
                             disabled={isLoading}
-                            className="flex items-center gap-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-900 text-white rounded-lg text-sm font-bold transition shadow-sm"
+                            className="flex-1 flex items-center justify-center gap-2 px-4 sm:px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-900 text-white rounded-lg text-sm font-bold transition shadow-xs cursor-pointer"
                         >
                             <Camera className="w-4 h-4" /> Capture Panel
                         </button>
                         <button
                             type="button"
                             onClick={stopCamera}
-                            className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-sm font-medium transition border border-slate-700"
+                            className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-sm font-medium transition border border-slate-700 cursor-pointer"
                         >
                             Stop
                         </button>
-                    </>
+                    </div>
                 )}
 
-                <label className="flex items-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-sm font-medium transition cursor-pointer border border-slate-700">
+                <label className="flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-sm font-medium transition cursor-pointer border border-slate-700">
                     <Upload className="w-4 h-4" /> Upload
                     <input type="file" accept="image/*" multiple onChange={handleFileUpload} className="hidden" />
                 </label>
@@ -326,9 +326,9 @@ export function CameraScanner({ onScanComplete, isLoading }: CameraScannerProps)
                         type="button"
                         onClick={submitDossier}
                         disabled={isLoading}
-                        className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-900 text-white rounded-lg text-sm font-bold transition shadow-sm ml-auto"
+                        className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-900 text-white rounded-lg text-sm font-bold transition shadow-xs sm:ml-auto cursor-pointer"
                     >
-                        {isLoading ? <RefreshCcw className="w-4 h-4 animate-spin" /> : <><Send className="w-4 h-4" /> Submit Dossier</>}
+                        {isLoading ? <RefreshCcw className="w-4 h-4 animate-spin" /> : <><Send className="w-4 h-4" /> Submit Dossier ({capturedImages.length})</>}
                     </button>
                 )}
             </div>
