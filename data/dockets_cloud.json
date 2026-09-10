@@ -1,13 +1,6 @@
 [
   {
     "result": {
-      "inspection_id": "INSP-TEST-SYNC"
-    },
-    "commodityLabel": "Test Commodity",
-    "manufacturerLabel": "Test Mfr"
-  },
-  {
-    "result": {
       "inspection_id": "INSP-47852450",
       "timestamp": "2026-09-10T13:44:12.450Z",
       "extracted_data": {
