@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef } from 'react';
-import { Eye, EyeOff, Ruler, Scale, Check, Info } from 'lucide-react';
+import { Eye, EyeOff, Ruler, Scale, Check, Info, Maximize } from 'lucide-react';
 import { ExtractedDeclarations, ViolationRecord, BoundingBox } from '../../types/metrology';
 
 // ---------------------------------------------------------------------------
@@ -19,6 +19,7 @@ interface BoundingBoxOverlayProps {
     isCompliant: boolean;
     ratio: number;
   }) => void;
+  onFullscreenToggle?: () => void;
 }
 
 interface BoxEntry {
@@ -338,6 +339,17 @@ export function BoundingBoxOverlay({
             {showOverlay ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
             {showOverlay ? 'Overlays ON' : 'Overlays OFF'}
           </button>
+          {onFullscreenToggle && (
+            <button
+              type="button"
+              onClick={onFullscreenToggle}
+              title="View Fullscreen"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold backdrop-blur-sm border transition-all duration-200 cursor-pointer bg-slate-900/80 border-slate-700 text-slate-400 hover:bg-slate-800/80 hover:text-white"
+            >
+              <Maximize className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Fullscreen</span>
+            </button>
+          )}
         </div>
       </div>
 

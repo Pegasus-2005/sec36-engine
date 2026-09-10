@@ -7,6 +7,7 @@ import { BoundingBoxOverlay } from '../components/scanner/BoundingBoxOverlay';
 import { Form1NoticeGenerator } from '../components/pdf/Form1NoticeGenerator';
 import { StatutorySearch } from '../components/StatutorySearch';
 import { ImageCropModal } from '../components/scanner/ImageCropModal';
+import { FullScreenImageViewer } from '../components/scanner/FullScreenImageViewer';
 import { StatutoryGazetteModal } from '../components/gov/StatutoryGazetteModal';
 import { InspectionAuditResult, ExtractedDeclarations, DocketEntry, ViolationRecord } from '../types/metrology';
 import { StatutoryRuleEngine } from '../lib/metrology/ruleEngine';
@@ -206,6 +207,7 @@ export default function Dashboard() {
   const [uploadCropSrc, setUploadCropSrc] = useState<string | null>(null);
   const [mobileTab, setMobileTab] = useState<'surveillance' | 'audit'>('surveillance');
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+  const [fullScreenViewerOpen, setFullScreenViewerOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ── Dynamic Officer Identity State ──────────────────────────────
@@ -1165,6 +1167,7 @@ export default function Dashboard() {
                         violations={auditResult?.violations || []}
                         surfaceLabel={`Surface ${activeDossierIndex + 1} of ${capturedImages.length}${activeDossierIndex === 0 ? ' · Front PDP' : ''}`}
                         onApplyFontMeasurement={handleApplyFontMeasurement}
+                        onFullscreenToggle={() => setFullScreenViewerOpen(true)}
                       />
                     </div>
 
@@ -1907,8 +1910,8 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* ── GIGW 3.0 Certified Government Footer ────────────────────────── */}
-      <footer style={{ backgroundColor: '#FFFFFF', borderTop: `1px solid ${NIC_BORDER}` }}>
+      {/* ── GIGW 3.0 Certified Government Footer (Hidden on Mobile) ────────────────────────── */}
+      <footer className="hidden lg:block" style={{ backgroundColor: '#FFFFFF', borderTop: `1px solid ${NIC_BORDER}` }}>
         <div className="px-4 py-4 sm:px-6 sm:py-6 space-y-3 max-w-7xl mx-auto">
           {/* Top row with Logos & Certifications */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 pb-4">
@@ -1984,6 +1987,15 @@ export default function Dashboard() {
 
       {/* RAG Statutory Index (Phase 4) */}
       <StatutorySearch />
+
+      {/* Full Screen Image Viewer */}
+      {fullScreenViewerOpen && capturedImages.length > 0 && (
+        <FullScreenImageViewer
+          images={capturedImages}
+          initialIndex={activeDossierIndex}
+          onClose={() => setFullScreenViewerOpen(false)}
+        />
+      )}
     </div>
   );
 }

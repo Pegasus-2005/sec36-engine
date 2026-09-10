@@ -154,10 +154,10 @@ export function ImageCropModal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-      <div className="bg-slate-900 border border-slate-700 rounded-xl max-w-3xl w-full overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black p-0">
+      <div className="bg-black w-full h-full overflow-hidden flex flex-col">
         {/* Modal Header */}
-        <div className="flex items-center justify-between px-5 py-3.5 bg-slate-800/90 border-b border-slate-700">
+        <div className="flex items-center justify-between px-5 py-3.5 bg-slate-900 border-b border-slate-800 pt-safe">
           <div className="flex items-center gap-2 text-white">
             <Crop className="w-4 h-4 text-amber-400" />
             <h3 className="font-bold text-sm">{title}</h3>
@@ -205,10 +205,10 @@ export function ImageCropModal({
         </div>
 
         {/* Crop canvas area */}
-        <div className="relative flex-1 bg-black flex items-center justify-center overflow-hidden p-4 select-none">
+        <div className="relative flex-1 bg-black flex items-center justify-center overflow-hidden p-0 sm:p-4 select-none">
           <div
             ref={containerRef}
-            className="relative max-h-[60vh] max-w-full inline-block"
+            className="relative max-h-full max-w-full inline-block"
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
           >
@@ -216,7 +216,7 @@ export function ImageCropModal({
               ref={imgRef}
               src={imageSrc}
               alt="Source to crop"
-              className="max-h-[60vh] max-w-full block object-contain pointer-events-none"
+              className="max-h-full max-w-full block pointer-events-none"
             />
 
             {/* Dark mask outside crop box */}
@@ -300,11 +300,11 @@ export function ImageCropModal({
         </div>
 
         {/* Modal Footer Controls */}
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5 px-4 sm:px-5 py-3 bg-slate-800/90 border-t border-slate-700">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5 px-4 sm:px-5 py-3 bg-slate-900 border-t border-slate-800 pb-safe">
           <button
             type="button"
             onClick={() => onConfirmCrop(imageSrc)}
-            className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs text-slate-300 hover:text-white bg-slate-700 hover:bg-slate-600 rounded transition-colors cursor-pointer"
+            className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded transition-colors cursor-pointer"
           >
             <Maximize2 className="w-3.5 h-3.5" />
             Keep Full Uncropped Image
