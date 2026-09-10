@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI, SchemaType, Schema } from '@google/generative-ai';
 import { StatutoryRuleEngine } from '@/lib/metrology/ruleEngine';
-import { ExtractedDeclarations, DocketEntry } from '@/types/metrology';
+import { ExtractedDeclarations } from '@/types/metrology';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -404,25 +404,6 @@ export async function POST(req: NextRequest) {
 
         // ── Deterministic statutory evaluation ───────────────────────────────
         const auditResult = StatutoryRuleEngine.evaluatePackage(extractedData as ExtractedDeclarations);
-
-        // ── Save to local repository ─────────────────────────────────────────
-        const docketEntry: DocketEntry = {
-            result: auditResult,
-            commodityLabel: auditResult.extracted_data.commodity_name?.raw_text || 'Unknown Commodity',
-            manufacturerLabel: auditResult.extracted_data.manufacturer?.raw_text || 'Unknown Manufacturer',
-            imageThumb: `data:${inlineDataParts[0]?.inlineData.mimeType || 'image/jpeg'};base64,${inlineDataParts[0]?.inlineData.data || ''}`,
-        };
-
-        try {
-            await fetch(new URL('/api/dockets', req.url), {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(docketEntry),
-            });
-        } catch (dbErr) {
-            console.error('[inspect] Failed to save docket to local database:', dbErr);
-            // Non-fatal error, continue
-        }
 
         return NextResponse.json({ success: true, audit: auditResult });
 
