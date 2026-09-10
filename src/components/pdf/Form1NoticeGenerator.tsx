@@ -134,71 +134,157 @@ export function Form1NoticeGenerator({ auditResult, packageImages = [], officerN
       line();
 
       // ── Section II: Package Image Evidence ───────────────────────────────────
-      const primaryImage = packageImages.length > 0 ? packageImages[0] : null;
-      if (primaryImage) {
+      // Preload and normalize all package images
+      const loadedImages = await Promise.all(
+        packageImages.map((src) => {
+          return new Promise<{ src: string; width: number; height: number; format: 'JPEG' | 'PNG' }>((resolve) => {
+            if (typeof window === 'undefined') {
+              resolve({ src, width: 800, height: 600, format: src.startsWith('data:image/png') ? 'PNG' : 'JPEG' });
+              return;
+            }
+            const img = new Image();
+            img.onload = () => {
+              let fmt: 'JPEG' | 'PNG' = src.startsWith('data:image/png') ? 'PNG' : 'JPEG';
+              let cleanSrc = src;
+              // If not standard JPEG or PNG (e.g. WebP), convert via canvas to clean JPEG
+              if (!src.startsWith('data:image/jpeg') && !src.startsWith('data:image/png')) {
+                const c = document.createElement('canvas');
+                c.width = img.naturalWidth || 800;
+                c.height = img.naturalHeight || 600;
+                const ctx = c.getContext('2d');
+                if (ctx) {
+                  ctx.drawImage(img, 0, 0);
+                  cleanSrc = c.toDataURL('image/jpeg', 0.9);
+                  fmt = 'JPEG';
+                }
+              }
+              resolve({
+                src: cleanSrc,
+                width: img.naturalWidth || 800,
+                height: img.naturalHeight || 600,
+                format: fmt,
+              });
+            };
+            img.onerror = () => {
+              resolve({
+                src,
+                width: 800,
+                height: 600,
+                format: src.startsWith('data:image/png') ? 'PNG' : 'JPEG',
+              });
+            };
+            img.src = src;
+          });
+        })
+      );
+
+      const hasImages = loadedImages.length > 0;
+      if (hasImages) {
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(10);
         doc.setTextColor(12, 37, 83);
-        doc.text('II. PACKAGING IMAGE EVIDENCE', MARGIN, y);
-        y += 5;
+        const surfaceText = loadedImages.length > 1 ? ` (DOSSIER: ${loadedImages.length} SURFACES)` : '';
+        doc.text(`II. PACKAGING IMAGE EVIDENCE${surfaceText}`, MARGIN, y);
+        y += 4.5;
 
-        // Fit image within content width, max height 50mm
-        const MAX_IMG_H = 50;
-        const MAX_IMG_W = CONTENT_W;
-        
-        let imgW = MAX_IMG_W;
-        let imgH = MAX_IMG_H;
-        let ratio = 1.6;
+        if (loadedImages.length === 1) {
+          // Single Image Layout (Hero)
+          const item = loadedImages[0];
+          const MAX_IMG_H = 46;
+          const MAX_IMG_W = CONTENT_W;
+          const ratio = item.width / item.height;
 
-        if (typeof window !== 'undefined') {
-          try {
-            const imgEl = new Image();
-            imgEl.src = primaryImage;
-            const nw = imgEl.naturalWidth || 800;
-            const nh = imgEl.naturalHeight || 600;
-            ratio = nw / nh;
-          } catch {
-            ratio = 1.6;
+          let imgW = Math.min(MAX_IMG_W, MAX_IMG_H * ratio);
+          let imgH = imgW / ratio;
+          if (imgH > MAX_IMG_H) {
+            imgH = MAX_IMG_H;
+            imgW = imgH * ratio;
           }
-        }
+          const imgX = MARGIN + (CONTENT_W - imgW) / 2;
 
-        imgW = Math.min(MAX_IMG_W, MAX_IMG_H * ratio);
-        imgH = imgW / ratio;
-        if (imgH > MAX_IMG_H) {
-          imgH = MAX_IMG_H;
-          imgW = imgH * ratio;
-        }
+          try {
+            doc.addImage(item.src, item.format, imgX, y, imgW, imgH);
+            y += imgH + 3.5;
+          } catch (imgErr) {
+            console.warn('Failed to embed primary image into PDF', imgErr);
+            doc.setFillColor(240, 243, 248);
+            doc.rect(MARGIN, y, CONTENT_W, 20, 'F');
+            doc.setFontSize(8);
+            doc.setTextColor(100, 100, 100);
+            doc.text('[Packaging Image Evidence Captured on Terminal]', PAGE_W / 2, y + 11, { align: 'center' });
+            y += 24;
+          }
 
-        const imgX = MARGIN + (CONTENT_W - imgW) / 2;
-        let imgFormat: 'JPEG' | 'PNG' = 'JPEG';
-        if (primaryImage.startsWith('data:image/png')) imgFormat = 'PNG';
-
-        try {
-          doc.addImage(primaryImage, imgFormat, imgX, y, imgW, imgH);
-          y += imgH + 4;
-        } catch (imgErr) {
-          console.warn('Failed to embed primary image into PDF', imgErr);
-          doc.setFillColor(240, 243, 248);
-          doc.rect(MARGIN, y, CONTENT_W, 20, 'F');
-          doc.setFontSize(8);
+          doc.setFontSize(7);
           doc.setTextColor(100, 100, 100);
-          doc.text('[Packaging Image Evidence Captured on Terminal]', PAGE_W / 2, y + 11, { align: 'center' });
-          y += 24;
-        }
+          doc.setFont('helvetica', 'italic');
+          doc.text(`Fig. 1 - Packaged commodity evidence captured during inspection (Ref: ${auditResult.inspection_id})`, MARGIN, y);
+          y += 5;
+          line();
+        } else {
+          // Multiple Images Layout (2-Column Grid)
+          const colGap = 6;
+          const colWidth = (CONTENT_W - colGap) / 2;
+          const maxCellH = 38;
 
-        doc.setFontSize(7.5);
-        doc.setTextColor(120, 120, 120);
-        doc.setFont('helvetica', 'italic');
-        doc.text(`Fig. 1 - Packaged commodity evidence captured during inspection (Ref: ${auditResult.inspection_id})`, MARGIN, y);
-        y += 5.5;
-        line();
+          for (let i = 0; i < loadedImages.length; i += 2) {
+            // Check if this row fits on current page
+            if (y + maxCellH + 10 > 270) {
+              doc.addPage();
+              y = 20;
+            }
+
+            const rowImages = loadedImages.slice(i, i + 2);
+
+            rowImages.forEach((item, colIdx) => {
+              const ratio = item.width / item.height;
+              let imgW = Math.min(colWidth, maxCellH * ratio);
+              let imgH = imgW / ratio;
+              if (imgH > maxCellH) {
+                imgH = maxCellH;
+                imgW = imgH * ratio;
+              }
+
+              const colX = MARGIN + colIdx * (colWidth + colGap);
+              const imgX = colX + (colWidth - imgW) / 2;
+              const imgY = y + (maxCellH - imgH) / 2;
+
+              try {
+                doc.addImage(item.src, item.format, imgX, imgY, imgW, imgH);
+              } catch (imgErr) {
+                console.warn(`Failed to embed image ${i + colIdx + 1} into PDF`, imgErr);
+              }
+
+              const surfaceIdx = i + colIdx;
+              const surfaceLabel = surfaceIdx === 0
+                ? 'Front Principal Display Panel (PDP)'
+                : surfaceIdx === 1
+                ? 'Information Panel / Back Surface'
+                : `Side Panel Surface ${surfaceIdx}`;
+
+              doc.setFontSize(6.5);
+              doc.setTextColor(100, 100, 100);
+              doc.setFont('helvetica', 'italic');
+              doc.text(`Fig. ${surfaceIdx + 1} - ${surfaceLabel}`, colX, y + maxCellH + 3.5);
+            });
+
+            y += maxCellH + 6.5;
+          }
+
+          line();
+        }
       }
 
       // ── Section III: Detected Violations Table ─────────────────────────────────
+      if (y > 215) {
+        doc.addPage();
+        y = 20;
+      }
+
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(10);
       doc.setTextColor(12, 37, 83);
-      const sectionNum = primaryImage ? 'III' : 'II';
+      const sectionNum = hasImages ? 'III' : 'II';
       doc.text(`${sectionNum}. RULE 6(1) VIOLATION SUMMARY`, MARGIN, y);
       y += 4;
 
@@ -259,7 +345,7 @@ export function Form1NoticeGenerator({ auditResult, packageImages = [], officerN
           y = 20;
         }
 
-        const nextSection = primaryImage ? 'IV' : 'III';
+        const nextSection = hasImages ? 'IV' : 'III';
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(10);
         doc.setTextColor(12, 37, 83);
@@ -311,7 +397,7 @@ export function Form1NoticeGenerator({ auditResult, packageImages = [], officerN
           y = 20;
         }
 
-        const remSection = primaryImage
+        const remSection = hasImages
           ? auditResult.passed_rules.length > 0 ? 'V' : 'IV'
           : auditResult.passed_rules.length > 0 ? 'IV' : 'III';
 

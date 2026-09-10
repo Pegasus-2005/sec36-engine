@@ -205,6 +205,7 @@ export interface DocketEntry {
   commodityLabel: string;
   manufacturerLabel: string;
   imageThumb?: string;
+  images?: string[];
 }
 export type ComplianceStatus = 'COMPLIANT' | 'NON_COMPLIANT' | 'ACTION_REQUIRED';
 

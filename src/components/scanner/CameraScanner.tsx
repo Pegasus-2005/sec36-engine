@@ -146,15 +146,28 @@ export function CameraScanner({ onScanComplete, isLoading }: CameraScannerProps)
 
     const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const files = Array.from(e.target.files || []);
-        files.forEach(file => {
+        if (files.length === 0) return;
+
+        if (files.length === 1) {
             const reader = new FileReader();
             reader.onloadend = () => {
                 if (typeof reader.result === 'string') {
-                    setCapturedImages(prev => [...prev, reader.result as string]);
+                    setCropTargetIndex(null);
+                    setCropImageSrc(reader.result as string);
                 }
             };
-            reader.readAsDataURL(file);
-        });
+            reader.readAsDataURL(files[0]);
+        } else {
+            files.forEach(file => {
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    if (typeof reader.result === 'string') {
+                        setCapturedImages(prev => [...prev, reader.result as string]);
+                    }
+                };
+                reader.readAsDataURL(file);
+            });
+        }
         // Reset input so the same file can be uploaded again if needed
         e.target.value = '';
     };
@@ -339,9 +352,6 @@ export function CameraScanner({ onScanComplete, isLoading }: CameraScannerProps)
                 title={cropTargetIndex !== null ? `Crop Surface ${cropTargetIndex + 1}` : `Crop Captured Surface ${capturedImages.length + 1}`}
                 onConfirmCrop={handleCropConfirmed}
                 onCancel={() => {
-                    if (cropTargetIndex === null && cropImageSrc) {
-                        setCapturedImages(prev => [...prev, cropImageSrc]);
-                    }
                     setCropImageSrc(null);
                     setCropTargetIndex(null);
                 }}

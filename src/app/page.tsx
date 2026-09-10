@@ -399,8 +399,18 @@ export default function Dashboard() {
   };
 
   // ── Append new audit to docket ledger ───────────────────────────────────
-  const appendToDocket = async (result: InspectionAuditResult, imageThumb?: string) => {
+  const appendToDocket = async (
+    result: InspectionAuditResult,
+    imageThumb?: string,
+    allImages?: string[]
+  ) => {
     const thumb = await createOptimizedThumb(imageThumb);
+    const rawList = allImages && allImages.length > 0 ? allImages : (thumb ? [thumb] : []);
+    const optImages = await Promise.all(
+      rawList.slice(0, 4).map((img) => createOptimizedThumb(img))
+    );
+    const validImages = optImages.filter((img): img is string => !!img);
+
     const commodity = result.extracted_data.commodity_name?.raw_text || 'Unknown Commodity';
     const manufacturer = result.extracted_data.manufacturer?.raw_text || 'Unknown Manufacturer';
     const entry: DocketEntry = {
@@ -408,6 +418,7 @@ export default function Dashboard() {
       commodityLabel: commodity || 'Unidentified Packaged Commodity',
       manufacturerLabel: manufacturer || 'Manufacturer Not Declared',
       imageThumb: thumb,
+      images: validImages.length > 0 ? validImages : (thumb ? [thumb] : undefined),
     };
     setDocketHistory((prev) => [entry, ...prev].slice(0, 100)); // optimistic UI update
     try {
@@ -487,7 +498,7 @@ export default function Dashboard() {
       }
     }
     setAuditResult(updatedAudit);
-    appendToDocket(updatedAudit, capturedImages[activeDossierIndex] || capturedImages[0]);
+    appendToDocket(updatedAudit, capturedImages[activeDossierIndex] || capturedImages[0], capturedImages);
 
     if (voiceHudEnabled && 'speechSynthesis' in window) {
       window.speechSynthesis.cancel();
@@ -511,7 +522,7 @@ export default function Dashboard() {
       const demoResult = { ...MOCK_AUDIT, timestamp: new Date().toISOString() };
       setAuditResult(demoResult);
       setMobileTab('audit');
-      appendToDocket(demoResult, base64Images[0]);
+      appendToDocket(demoResult, base64Images[0], base64Images);
       speakAuditResult(demoResult);
       setIsAuditing(false);
       return;
@@ -527,7 +538,7 @@ export default function Dashboard() {
       } else if (data.success) {
         setAuditResult(data.audit);
         setMobileTab('audit');
-        appendToDocket(data.audit, base64Images[0]);
+        appendToDocket(data.audit, base64Images[0], base64Images);
         speakAuditResult(data.audit);
       } else {
         console.error('Audit API error:', data.error);
@@ -1043,13 +1054,13 @@ export default function Dashboard() {
             liveDockets={docketHistory}
             onViewAudit={(entry) => {
               setAuditResult(entry.result);
-              setCapturedImages(entry.imageThumb ? [entry.imageThumb] : []);
+              setCapturedImages(entry.images && entry.images.length > 0 ? entry.images : (entry.imageThumb ? [entry.imageThumb] : []));
               setMainView('terminal');
               setMobileTab('audit');
             }}
             onDownloadForm1={(_entry) => {
               setAuditResult(_entry.result);
-              setCapturedImages(_entry.imageThumb ? [_entry.imageThumb] : []);
+              setCapturedImages(_entry.images && _entry.images.length > 0 ? _entry.images : (_entry.imageThumb ? [_entry.imageThumb] : []));
               setMainView('terminal');
               setMobileTab('audit');
             }}

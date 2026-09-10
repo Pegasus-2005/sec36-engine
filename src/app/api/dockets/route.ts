@@ -81,12 +81,21 @@ async function getGithubDockets(): Promise<{ dockets: any[]; sha: string } | nul
 /** Persist dockets to GitHub storage branch */
 async function saveGithubDockets(dockets: any[]): Promise<boolean> {
   if (!GITHUB_REPO || !GITHUB_TOKEN) return false;
-  // Bound list to 50 latest entries to keep payload < 500KB
+  // Bound list to 50 latest entries to keep payload lean
   const bounded = dockets.slice(0, 50).map((entry) => {
-    if (entry.imageThumb && typeof entry.imageThumb === 'string' && entry.imageThumb.length > 250000) {
-      return { ...entry, imageThumb: entry.imageThumb.slice(0, 250000) };
+    const clean = { ...entry };
+    if (clean.imageThumb && typeof clean.imageThumb === 'string' && clean.imageThumb.length > 250000) {
+      clean.imageThumb = clean.imageThumb.slice(0, 250000);
     }
-    return entry;
+    if (Array.isArray(clean.images)) {
+      clean.images = clean.images.slice(0, 4).map((img: any) => {
+        if (typeof img === 'string' && img.length > 250000) {
+          return img.slice(0, 250000);
+        }
+        return img;
+      });
+    }
+    return clean;
   });
 
   const contentBase64 = Buffer.from(JSON.stringify(bounded, null, 2)).toString('base64');
