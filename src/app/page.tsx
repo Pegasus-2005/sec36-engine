@@ -465,7 +465,7 @@ export default function Dashboard() {
       const img = new Image();
       img.onload = () => {
         let { width, height } = img;
-        const maxDim = 320; // Crisp preview thumbnail, <25KB
+        const maxDim = 480; // Crisp evidence preview thumbnail, ~25-35KB
         if (width > maxDim || height > maxDim) {
           if (width > height) {
             height = Math.round((height * maxDim) / width);
@@ -481,7 +481,7 @@ export default function Dashboard() {
         const ctx = canvas.getContext('2d');
         if (!ctx) { resolve(undefined); return; }
         ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', 0.65));
+        resolve(canvas.toDataURL('image/jpeg', 0.7));
       };
       img.onerror = () => resolve(undefined); // Never fallback to raw multi-megabyte string
       img.src = raw;
@@ -497,7 +497,7 @@ export default function Dashboard() {
     const thumb = await createOptimizedThumb(imageThumb);
     const rawList = allImages && allImages.length > 0 ? allImages : (thumb ? [thumb] : []);
     const optImages = await Promise.all(
-      rawList.slice(0, 2).map((img) => createOptimizedThumb(img))
+      rawList.slice(0, 4).map((img) => createOptimizedThumb(img))
     );
     const validImages = optImages.filter((img): img is string => !!img);
 

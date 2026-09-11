@@ -99,27 +99,19 @@ async function getGithubDockets(): Promise<{ dockets: any[]; sha: string } | nul
 async function saveGithubDockets(dockets: any[]): Promise<boolean> {
   if (!GITHUB_REPO || !GITHUB_TOKEN) return false;
 
-  // Bound list to 50 latest entries and strictly bound image sizes to guarantee payload < 650KB
-  let bounded = dockets.slice(0, 50).map((entry) => {
+  // Deduplicate redundant imageThumb if identical to images[0] to save ~300KB without losing visual data
+  let bounded = dockets.slice(0, 35).map((entry) => {
     const clean = { ...entry };
-    if (clean.imageThumb && typeof clean.imageThumb === 'string' && clean.imageThumb.length > 35000) {
-      clean.imageThumb = clean.imageThumb.slice(0, 35000);
-    }
-    if (Array.isArray(clean.images)) {
-      clean.images = clean.images.slice(0, 2).map((img: any) => {
-        if (typeof img === 'string' && img.length > 35000) {
-          return img.slice(0, 35000);
-        }
-        return img;
-      });
+    if (clean.images && Array.isArray(clean.images) && clean.images.length > 0 && clean.imageThumb === clean.images[0]) {
+      delete clean.imageThumb;
     }
     return clean;
   });
 
-  // Ensure total payload is strictly under 700KB (GitHub 1MB limit is 1,000,000 bytes)
+  // Ensure total payload is strictly under 850KB by pruning older dockets if needed (GitHub 1MB limit is 1,000,000 bytes)
   let jsonString = JSON.stringify(bounded, null, 2);
-  while (Buffer.byteLength(jsonString) > 700000 && bounded.length > 10) {
-    bounded = bounded.slice(0, bounded.length - 5);
+  while (Buffer.byteLength(jsonString) > 850000 && bounded.length > 3) {
+    bounded = bounded.slice(0, bounded.length - 1);
     jsonString = JSON.stringify(bounded, null, 2);
   }
 
@@ -185,7 +177,7 @@ async function saveGithubDockets(dockets: any[]): Promise<boolean> {
 async function getDockets(): Promise<{ dockets: any[]; mode: string }> {
   const now = Date.now();
   if (memoryDockets.length > 0 && now - memoryLastFetched < CACHE_TTL_MS) {
-    return { dockets: memoryDockets, mode: 'memory_cache' };
+    return { dockets: sanitizeDockets(memoryDockets), mode: 'memory_cache' };
   }
 
   // 1. Check GitHub cloud database first (persisted on db-storage branch, accessible across all devices)
@@ -193,7 +185,7 @@ async function getDockets(): Promise<{ dockets: any[]; mode: string }> {
   if (gh && Array.isArray(gh.dockets) && gh.dockets.length > 0) {
     memoryDockets = gh.dockets;
     memoryLastFetched = now;
-    return { dockets: gh.dockets, mode: 'github_cloud_sync' };
+    return { dockets: sanitizeDockets(gh.dockets), mode: 'github_cloud_sync' };
   }
 
   // 2. Check KV / Upstash if configured
@@ -205,7 +197,7 @@ async function getDockets(): Promise<{ dockets: any[]; mode: string }> {
         if (Array.isArray(parsed)) {
           memoryDockets = parsed;
           memoryLastFetched = now;
-          return { dockets: parsed, mode: 'cloud_kv' };
+          return { dockets: sanitizeDockets(parsed), mode: 'cloud_kv' };
         }
       }
     } catch (err) {
@@ -220,7 +212,7 @@ async function getDockets(): Promise<{ dockets: any[]; mode: string }> {
     if (Array.isArray(parsed)) {
       memoryDockets = parsed;
       memoryLastFetched = now;
-      return { dockets: parsed, mode: 'local_file' };
+      return { dockets: sanitizeDockets(parsed), mode: 'local_file' };
     }
   } catch (err: any) {
     if (err.code === 'ENOENT') {
@@ -232,7 +224,21 @@ async function getDockets(): Promise<{ dockets: any[]; mode: string }> {
     }
   }
 
-  return { dockets: memoryDockets, mode: 'memory' };
+  return { dockets: sanitizeDockets(memoryDockets), mode: 'memory' };
+}
+
+/** Ensure both imageThumb and images are populated with complete valid data URIs */
+function sanitizeDockets(dockets: any[]): any[] {
+  return (dockets || []).map((d: any) => {
+    const entry = { ...d };
+    if (!entry.imageThumb && Array.isArray(entry.images) && entry.images.length > 0) {
+      entry.imageThumb = entry.images[0];
+    }
+    if ((!entry.images || entry.images.length === 0) && entry.imageThumb) {
+      entry.images = [entry.imageThumb];
+    }
+    return entry;
+  });
 }
 
 export async function GET() {
