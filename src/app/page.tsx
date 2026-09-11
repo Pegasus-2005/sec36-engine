@@ -44,6 +44,7 @@ import {
   LogOut,
   RefreshCcw,
   AlertCircle,
+  Ruler,
 } from 'lucide-react';
 
 // ---------------------------------------------------------------------------
@@ -1433,6 +1434,7 @@ export default function Dashboard() {
                         declarations={auditResult?.extracted_data}
                         violations={auditResult?.violations || []}
                         surfaceLabel={`Surface ${activeDossierIndex + 1} of ${capturedImages.length}${activeDossierIndex === 0 ? ' · Front PDP' : ''}`}
+                        surfaceIndex={activeDossierIndex}
                         onApplyFontMeasurement={handleApplyFontMeasurement}
                         onFullscreenToggle={() => setFullScreenViewerOpen(true)}
                       />
@@ -1465,6 +1467,34 @@ export default function Dashboard() {
                         </div>
                       </div>
                     )}
+
+                    {/* Statutory Physical Scale Calibration Reference for Legal Metrology Officers */}
+                    <div className="mt-3 p-3 bg-slate-50 border border-slate-200 rounded-xs">
+                      <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-800 uppercase tracking-wider mb-2">
+                        <Ruler className="w-3.5 h-3.5 text-[#0055A4]" />
+                        <span>Physical PDP Scale Calibration Reference Standards:</span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 text-[11px] font-mono">
+                        <div className="p-2 bg-white border border-slate-200 rounded-xs shadow-2xs">
+                          <strong className="text-slate-900 font-bold">75mm:</strong> Small packs, soap bars, pocket confectionery, pouches.
+                        </div>
+                        <div className="p-2 bg-white border border-slate-200 rounded-xs shadow-2xs">
+                          <strong className="text-slate-900 font-bold">95mm:</strong> Standard biscuit packs (e.g. Parle-G, Marie Gold).
+                        </div>
+                        <div className="p-2 bg-white border border-slate-200 rounded-xs shadow-2xs">
+                          <strong className="text-slate-900 font-bold">120mm:</strong> Medium jars, face cream tubs, snack packs.
+                        </div>
+                        <div className="p-2 bg-white border border-slate-200 rounded-xs shadow-2xs">
+                          <strong className="text-slate-900 font-bold">150mm:</strong> Standard beverage cans, tea boxes.
+                        </div>
+                        <div className="p-2 bg-white border border-slate-200 rounded-xs shadow-2xs">
+                          <strong className="text-slate-900 font-bold">180mm:</strong> Toothpaste cartons, large bottles.
+                        </div>
+                        <div className="p-2 bg-white border border-slate-200 rounded-xs shadow-2xs">
+                          <strong className="text-slate-900 font-bold">220mm:</strong> Cereal boxes, detergent packs, 1L bottles.
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}

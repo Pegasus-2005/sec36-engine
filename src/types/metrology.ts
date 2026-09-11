@@ -22,6 +22,8 @@ export interface BoundingBox {
   xmin: number;
   ymax: number;
   xmax: number;
+  /** 0-based surface/image index where this declaration physically appears (e.g. 0 = Front PDP, 1 = Back, 2 = Flap). */
+  image_index?: number;
 }
 
 /**

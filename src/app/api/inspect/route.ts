@@ -17,6 +17,7 @@ const BOX_SCHEMA: Schema = {
         xmin: { type: SchemaType.NUMBER },
         ymax: { type: SchemaType.NUMBER },
         xmax: { type: SchemaType.NUMBER },
+        image_index: { type: SchemaType.INTEGER },
     },
     required: ['ymin', 'xmin', 'ymax', 'xmax'],
 };
@@ -290,6 +291,22 @@ Extract:
 
 FAILURE PROTOCOL — if a field is genuinely absent:
   raw_text → ""  |  is_detected/is_declared → false  |  numeric values → 0  |  booleans → false  |  box_2d → omit
+
+═══════════════════════════════════════════════════════════
+BOUNDING BOX (box_2d) ZERO-HALLUCINATION RULES:
+═══════════════════════════════════════════════════════════
+1. ONLY return box_2d if the declaration is physically printed and clearly visible on an image.
+2. If a declaration (e.g. MRP, Date, Manufacturer Address, Country of Origin) is NOT on an image, you MUST OMIT box_2d for that field!
+3. NEVER place a box over unrelated graphics or marketing text:
+   • NEVER put an MRP box over a brand logo, graphic swirl, or tagline if no rupee price is printed there.
+   • NEVER put a Country of Origin box over Net Quantity text (e.g. "300g + 1N" is Net Quantity, NOT Country of Origin!).
+   • NEVER put a Manufacturer box over promotional offers (e.g. "SAVER with PREMIUM BRUSH").
+   • NEVER put an Mfg Date box over slogans like "ACTIVE PREVENTION".
+4. MULTI-SURFACE ATTRIBUTION:
+   • When multiple images are provided (Image 0 = Front PDP, Image 1 = Back, etc.):
+     * Set image_index in box_2d to the 0-based index of the image where that text is physically located (0 for image 1, 1 for image 2, etc.).
+     * If MRP is on the back (Image 1), set image_index = 1. Never assign it to Image 0.
+5. All box_2d coordinates (ymin, xmin, ymax, xmax) are normalized to 0–1000 scale.
 
 ACCURACY RULES:
 • Never fabricate text. Only report what is physically visible.

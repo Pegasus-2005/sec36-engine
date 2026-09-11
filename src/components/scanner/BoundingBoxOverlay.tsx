@@ -32,6 +32,7 @@ interface BoundingBoxOverlayProps {
   declarations?: ExtractedDeclarations;
   violations?: ViolationRecord[];
   surfaceLabel?: string;
+  surfaceIndex?: number;
   onApplyFontMeasurement?: (result: {
     measuredMm: number;
     requiredMm: number;
@@ -59,83 +60,90 @@ interface BoxEntry {
 function getEstimatedPdpHeightMm(declarations?: ExtractedDeclarations): number {
   if (!declarations) return 120;
 
-  // 1. Check physical dimensions declared on package under Rule 6(1)(f)
-  if (declarations.dimensions?.values) {
-    const text = declarations.dimensions.values;
-    const mmMatch = text.match(/(\d+(?:\.\d+)?)\s*(?:mm|millimeter)/i);
-    if (mmMatch) {
-      const val = parseFloat(mmMatch[1]);
-      if (val >= 25 && val <= 800) return Math.round(val);
+  // 1. Explicit Rule 6(1)(f) dimension values take top priority
+  if (declarations.dimensions?.is_declared && declarations.dimensions.values) {
+    const dimStr = declarations.dimensions.values.toLowerCase();
+    const cmMatches = Array.from(dimStr.matchAll(/(\d+(?:\.\d+)?)\s*(?:cm|centimeter)/g)).map((m) =>
+      parseFloat(m[1])
+    );
+    if (cmMatches.length > 0) {
+      const maxCm = Math.max(...cmMatches);
+      if (maxCm >= 3 && maxCm <= 100) return Math.round(maxCm * 10);
     }
-    const cmMatch = text.match(/(\d+(?:\.\d+)?)\s*(?:cm|centimeter)/i);
-    if (cmMatch) {
-      const val = parseFloat(cmMatch[1]) * 10;
-      if (val >= 25 && val <= 800) return Math.round(val);
+    const mmMatches = Array.from(dimStr.matchAll(/(\d+(?:\.\d+)?)\s*(?:mm|millimeter)/g)).map((m) =>
+      parseFloat(m[1])
+    );
+    if (mmMatches.length > 0) {
+      const maxMm = Math.max(...mmMatches);
+      if (maxMm >= 30 && maxMm <= 1000) return Math.round(maxMm);
     }
   }
 
-  // 2. Estimate from net quantity and commodity profile
-  const nq = declarations.net_quantity?.numeric_value;
-  const unit = (declarations.net_quantity?.unit || '').toLowerCase().trim();
-  let grams = nq || 0;
-  if (unit === 'kg' || unit === 'l' || unit === 'litre' || unit === 'liter') {
-    grams *= 1000;
-  }
-
+  // 2. Commodity-aware packaging physical standard height mapping
   const commodity = (declarations.commodity_name?.raw_text || '').toLowerCase();
+  const netQty = declarations.net_quantity?.numeric_value || 0;
+  const unit = (declarations.net_quantity?.unit || '').toLowerCase();
 
-  // Distinct Indian consumer packaging form factors
-  if (commodity.includes('paste') || commodity.includes('toothpaste')) {
-    return grams >= 150 ? 190 : 145; // Standard 100g-200g toothpaste carton: 145-190 mm
+  if (commodity.includes('toothpaste') || commodity.includes('paste') || commodity.includes('brush')) {
+    return netQty >= 200 ? 180 : 150;
   }
-  if (commodity.includes('biscuit') || commodity.includes('cookie')) {
-    return grams >= 200 ? 130 : (grams >= 80 ? 95 : 75); // Standard biscuit rolls / pillow packs
+  if (
+    commodity.includes('biscuit') ||
+    commodity.includes('cookie') ||
+    commodity.includes('cracker') ||
+    commodity.includes('rusk')
+  ) {
+    return netQty >= 250 ? 120 : 95;
   }
-  if (commodity.includes('soap') || commodity.includes('bar')) {
-    return 65; // Standard soap bar ~65 mm
+  if (commodity.includes('soap') || commodity.includes('bar') || commodity.includes('detergent bar')) {
+    return 75;
   }
-  if (commodity.includes('oil') || commodity.includes('shampoo') || commodity.includes('bottle')) {
-    return grams >= 1000 ? 260 : (grams >= 500 ? 210 : 160);
+  if (commodity.includes('snack') || commodity.includes('chip') || commodity.includes('namkeen') || commodity.includes('puff')) {
+    return netQty >= 100 ? 220 : 160;
   }
-  if (commodity.includes('chip') || commodity.includes('namkeen') || commodity.includes('snack')) {
-    return grams >= 100 ? 220 : 160; // Puffed snack pouches
+  if (commodity.includes('cereal') || commodity.includes('flake') || commodity.includes('muesli') || commodity.includes('oats')) {
+    return 220;
+  }
+  if (commodity.includes('oil') || commodity.includes('ghee') || commodity.includes('milk') || commodity.includes('beverage')) {
+    return unit.includes('l') || netQty >= 1000 ? 220 : 150;
+  }
+  if (commodity.includes('tea') || commodity.includes('coffee')) {
+    return netQty >= 500 ? 180 : 150;
+  }
+  if (commodity.includes('cream') || commodity.includes('gel') || commodity.includes('ointment') || commodity.includes('jar')) {
+    return 120;
   }
 
-  // General weight-to-height packaging envelope
-  if (grams > 0) {
-    if (grams <= 50) return 75;
-    if (grams <= 150) return 100;
-    if (grams <= 300) return 140;
-    if (grams <= 600) return 180;
-    if (grams <= 1500) return 240;
-    return 300;
-  }
-
-  return 120; // Default standard PDP height
+  // 3. Fallback based on net mass or volume
+  if (unit === 'kg' || unit === 'l' || (unit === 'g' && netQty >= 1000)) return 220;
+  if (netQty >= 500) return 180;
+  if (netQty >= 200) return 150;
+  if (netQty >= 100) return 120;
+  return 95;
 }
 
 /**
- * Returns statutory minimum font height under Rule 7 Table I (Area) & Table II (Net Qty)
+ * Computes Rule 7 minimum mandated font heights under both Table I (Area) & Table II (Net Qty).
  */
-function getMandatedMinFontHeight(netQtyGrams?: number, dimensions?: DimensionDetails) {
-  // Table II: Net Quantity
-  let minTable2 = 1.0;
-  if (netQtyGrams) {
-    if (netQtyGrams <= 50) minTable2 = 1.0;
-    else if (netQtyGrams <= 200) minTable2 = 2.0;
-    else if (netQtyGrams <= 1000) minTable2 = 4.0;
+function getMandatedMinFontHeight(netQtyVal?: number, dimensions?: DimensionDetails): {
+  requiredMm: number;
+  minTable1: number;
+  minTable2: number;
+} {
+  let minTable2 = 2.0;
+  if (typeof netQtyVal === 'number' && netQtyVal > 0) {
+    if (netQtyVal <= 50) minTable2 = 1.0;
+    else if (netQtyVal <= 100) minTable2 = 1.5;
+    else if (netQtyVal <= 200) minTable2 = 2.0;
+    else if (netQtyVal <= 500) minTable2 = 4.0;
     else minTable2 = 6.0;
   }
 
-  // Table I: Area of Principal Display Panel
-  let minTable1 = 1.0;
+  let minTable1 = 2.0;
   if (dimensions?.values) {
-    const match = dimensions.values.match(/(\d+(?:\.\d+)?)\s*(?:cm|mm)?\s*[xX×]\s*(\d+(?:\.\d+)?)/);
-    if (match) {
-      const d1 = parseFloat(match[1]);
-      const d2 = parseFloat(match[2]);
-      const isMm = /mm/i.test(dimensions.values);
-      const areaCm2 = isMm ? (d1 * d2) / 100 : (d1 * d2);
+    const dims = dimensions.values.match(/(\d+(?:\.\d+)?)/g);
+    if (dims && dims.length >= 2) {
+      const areaCm2 = parseFloat(dims[0]) * parseFloat(dims[1]);
       if (areaCm2 <= 50) minTable1 = 1.0;
       else if (areaCm2 <= 100) minTable1 = 1.5;
       else if (areaCm2 <= 500) minTable1 = 2.5;
@@ -158,40 +166,112 @@ function isFieldViolated(violations: ViolationRecord[], prefixes: string[]): boo
   );
 }
 
-/** Builds list of BoxEntry objects from ExtractedDeclarations */
-function buildBoxEntries(decls?: ExtractedDeclarations): BoxEntry[] {
+/**
+ * Builds list of BoxEntry objects from ExtractedDeclarations for the current surface.
+ * ZERO-HALLUCINATION:
+ * 1. Only includes declarations that are physically detected with non-empty text.
+ * 2. Only renders boxes on the surface/image matching their image_index.
+ * 3. Omitted/absent declarations produce NO boxes.
+ */
+function buildBoxEntries(decls?: ExtractedDeclarations, surfaceIndex: number = 0): BoxEntry[] {
   if (!decls) return [];
   const entries: BoxEntry[] = [];
 
+  // Package PDP outline should only appear on Surface 0 (Front PDP)
   if (decls.package_pdp_box) {
-    entries.push({
-      label: 'Package PDP',
-      box: decls.package_pdp_box,
-      citationPrefixes: [],
-      isPdpBox: true,
-    });
+    const pdpImgIdx = decls.package_pdp_box.image_index;
+    if (pdpImgIdx === undefined ? surfaceIndex === 0 : pdpImgIdx === surfaceIndex) {
+      entries.push({
+        label: 'Package PDP',
+        box: decls.package_pdp_box,
+        citationPrefixes: [],
+        isPdpBox: true,
+      });
+    }
   }
 
-  const fieldMap: Array<{
+  const isValidBox = (b?: BoundingBox) => {
+    if (!b) return false;
+    if (b.ymin === 0 && b.xmin === 0 && b.ymax === 0 && b.xmax === 0) return false;
+    if (b.ymax <= b.ymin || b.xmax <= b.xmin) return false;
+    // Multi-surface filtering: if box specifies an image_index, it must match active surface
+    if (b.image_index !== undefined && b.image_index !== surfaceIndex) return false;
+    return true;
+  };
+
+  const fieldList: Array<{
     label: string;
     box: BoundingBox | undefined;
+    isDetected: boolean;
     prefixes: string[];
   }> = [
-    { label: 'Manufacturer · R6(1)(a)', box: decls.manufacturer?.box_2d, prefixes: ['LM-R6(1)(a)'] },
-    { label: 'Country of Origin · R6(1)(aa)', box: decls.country_of_origin?.box_2d, prefixes: ['LM-R6(1)(aa)'] },
-    { label: 'Commodity Name · R6(1)(b)', box: decls.commodity_name?.box_2d, prefixes: ['LM-R6(1)(b)'] },
-    { label: 'Net Qty · R6(1)(c)', box: decls.net_quantity?.box_2d, prefixes: ['LM-R6(1)(c)'] },
-    { label: 'Mfg Date · R6(1)(d)', box: decls.mfg_or_import_date?.box_2d, prefixes: ['LM-R6(1)(d)'] },
-    { label: 'Best Before · R6(1)(da)', box: decls.expiry_or_best_before?.box_2d, prefixes: ['LM-R6(1)(da)'] },
-    { label: 'MRP · R6(1)(e)', box: decls.mrp?.box_2d, prefixes: ['LM-R6(1)(e)'] },
-    { label: 'USP · R6(11)', box: decls.unit_sale_price?.box_2d, prefixes: ['LM-R6(11)'] },
-    { label: 'Dimensions · R6(1)(f)', box: decls.dimensions?.box_2d, prefixes: ['LM-R6(1)(f)'] },
-    { label: 'Consumer Care · R6(2)', box: decls.consumer_care?.box_2d, prefixes: ['LM-R6(2)'] },
+    {
+      label: 'Manufacturer · R6(1)(a)',
+      box: decls.manufacturer?.box_2d,
+      isDetected: Boolean(decls.manufacturer?.is_detected && decls.manufacturer?.raw_text?.trim()),
+      prefixes: ['LM-R6(1)(a)'],
+    },
+    {
+      label: 'Country of Origin · R6(1)(aa)',
+      box: decls.country_of_origin?.box_2d,
+      isDetected: Boolean(decls.country_of_origin?.is_detected && decls.country_of_origin?.raw_text?.trim()),
+      prefixes: ['LM-R6(1)(aa)'],
+    },
+    {
+      label: 'Commodity Name · R6(1)(b)',
+      box: decls.commodity_name?.box_2d,
+      isDetected: Boolean(decls.commodity_name?.is_detected && decls.commodity_name?.raw_text?.trim()),
+      prefixes: ['LM-R6(1)(b)'],
+    },
+    {
+      label: 'Net Qty · R6(1)(c)',
+      box: decls.net_quantity?.box_2d,
+      isDetected: Boolean((decls.net_quantity?.numeric_value ?? 0) > 0 && decls.net_quantity?.raw_text?.trim()),
+      prefixes: ['LM-R6(1)(c)'],
+    },
+    {
+      label: 'Mfg Date · R6(1)(d)',
+      box: decls.mfg_or_import_date?.box_2d,
+      isDetected: Boolean(decls.mfg_or_import_date?.is_detected && decls.mfg_or_import_date?.raw_text?.trim()),
+      prefixes: ['LM-R6(1)(d)'],
+    },
+    {
+      label: 'Best Before · R6(1)(da)',
+      box: decls.expiry_or_best_before?.box_2d,
+      isDetected: Boolean(decls.expiry_or_best_before?.is_declared && decls.expiry_or_best_before?.raw_text?.trim()),
+      prefixes: ['LM-R6(1)(da)'],
+    },
+    {
+      label: 'MRP · R6(1)(e)',
+      box: decls.mrp?.box_2d,
+      isDetected: Boolean((decls.mrp?.numeric_value ?? 0) > 0 && decls.mrp?.raw_text?.trim()),
+      prefixes: ['LM-R6(1)(e)'],
+    },
+    {
+      label: 'USP · R6(11)',
+      box: decls.unit_sale_price?.box_2d,
+      isDetected: Boolean(decls.unit_sale_price?.is_declared && decls.unit_sale_price?.raw_text?.trim()),
+      prefixes: ['LM-R6(11)'],
+    },
+    {
+      label: 'Dimensions · R6(1)(f)',
+      box: decls.dimensions?.box_2d,
+      isDetected: Boolean(decls.dimensions?.is_declared && decls.dimensions?.raw_text?.trim()),
+      prefixes: ['LM-R6(1)(f)'],
+    },
+    {
+      label: 'Consumer Care · R6(2)',
+      box: decls.consumer_care?.box_2d,
+      isDetected: Boolean(
+        (decls.consumer_care?.has_phone || decls.consumer_care?.has_email) && decls.consumer_care?.raw_text?.trim()
+      ),
+      prefixes: ['LM-R6(2)'],
+    },
   ];
 
-  for (const { label, box, prefixes } of fieldMap) {
-    if (!box) continue;
-    entries.push({ label, box, citationPrefixes: prefixes });
+  for (const { label, box, isDetected, prefixes } of fieldList) {
+    if (!isDetected || !isValidBox(box)) continue;
+    entries.push({ label, box: box!, citationPrefixes: prefixes });
   }
 
   return entries;
@@ -270,6 +350,7 @@ export function BoundingBoxOverlay({
   declarations,
   violations = [],
   surfaceLabel,
+  surfaceIndex = 0,
   onApplyFontMeasurement,
   onFullscreenToggle,
 }: BoundingBoxOverlayProps) {
@@ -294,7 +375,7 @@ export function BoundingBoxOverlay({
   const imgRef = useRef<HTMLImageElement>(null);
   const loupeCanvasRef = useRef<HTMLCanvasElement>(null);
 
-  const entries = buildBoxEntries(declarations);
+  const entries = buildBoxEntries(declarations, surfaceIndex);
   const pdpBox = declarations?.package_pdp_box;
 
   // Auto-sync calibration scale when a new declaration result is loaded
@@ -667,8 +748,8 @@ export function BoundingBoxOverlay({
                         fontFamily="sans-serif"
                       >
                         {isCompliant
-                          ? `✓ Rule 7 Pass (≥ ${requiredMm} mm)`
-                          : `⚠️ Non-Compliant (< ${requiredMm} mm)`}
+                          ? `Rule 7 Pass (≥ ${requiredMm} mm)`
+                          : `Non-Compliant (< ${requiredMm} mm)`}
                       </text>
                     </g>
                   );
@@ -744,45 +825,54 @@ export function BoundingBoxOverlay({
                 <Sparkles className="w-3 h-3 text-cyan-400" />
                 <span>Snap to:</span>
               </span>
-              {declarations?.net_quantity?.box_2d && (
-                <button
-                  type="button"
-                  onClick={() => snapToField('net_qty', declarations.net_quantity.box_2d)}
-                  className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-all cursor-pointer ${
-                    activeSnapField === 'net_qty'
-                      ? 'bg-cyan-500 text-slate-950 font-bold'
-                      : 'bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-800/60'
-                  }`}
-                >
-                  🎯 Net Qty
-                </button>
-              )}
-              {declarations?.mrp?.box_2d && (
-                <button
-                  type="button"
-                  onClick={() => snapToField('mrp', declarations.mrp.box_2d)}
-                  className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-all cursor-pointer ${
-                    activeSnapField === 'mrp'
-                      ? 'bg-cyan-500 text-slate-950 font-bold'
-                      : 'bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-800/60'
-                  }`}
-                >
-                  🎯 MRP
-                </button>
-              )}
-              {declarations?.mfg_or_import_date?.box_2d && (
-                <button
-                  type="button"
-                  onClick={() => snapToField('mfg', declarations.mfg_or_import_date.box_2d)}
-                  className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-all cursor-pointer ${
-                    activeSnapField === 'mfg'
-                      ? 'bg-cyan-500 text-slate-950 font-bold'
-                      : 'bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-800/60'
-                  }`}
-                >
-                  🎯 Date
-                </button>
-              )}
+              {declarations?.net_quantity?.box_2d &&
+                (declarations.net_quantity.box_2d.image_index === undefined ||
+                  declarations.net_quantity.box_2d.image_index === surfaceIndex) &&
+                Boolean((declarations.net_quantity.numeric_value ?? 0) > 0 && declarations.net_quantity.raw_text?.trim()) && (
+                  <button
+                    type="button"
+                    onClick={() => snapToField('net_qty', declarations.net_quantity.box_2d)}
+                    className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-all cursor-pointer ${
+                      activeSnapField === 'net_qty'
+                        ? 'bg-cyan-500 text-slate-950 font-bold'
+                        : 'bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-800/60'
+                    }`}
+                  >
+                    Net Qty
+                  </button>
+                )}
+              {declarations?.mrp?.box_2d &&
+                (declarations.mrp.box_2d.image_index === undefined ||
+                  declarations.mrp.box_2d.image_index === surfaceIndex) &&
+                Boolean((declarations.mrp.numeric_value ?? 0) > 0 && declarations.mrp.raw_text?.trim()) && (
+                  <button
+                    type="button"
+                    onClick={() => snapToField('mrp', declarations.mrp.box_2d)}
+                    className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-all cursor-pointer ${
+                      activeSnapField === 'mrp'
+                        ? 'bg-cyan-500 text-slate-950 font-bold'
+                        : 'bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-800/60'
+                    }`}
+                  >
+                    MRP
+                  </button>
+                )}
+              {declarations?.mfg_or_import_date?.box_2d &&
+                (declarations.mfg_or_import_date.box_2d.image_index === undefined ||
+                  declarations.mfg_or_import_date.box_2d.image_index === surfaceIndex) &&
+                Boolean(declarations.mfg_or_import_date.is_detected && declarations.mfg_or_import_date.raw_text?.trim()) && (
+                  <button
+                    type="button"
+                    onClick={() => snapToField('mfg', declarations.mfg_or_import_date.box_2d)}
+                    className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-all cursor-pointer ${
+                      activeSnapField === 'mfg'
+                        ? 'bg-cyan-500 text-slate-950 font-bold'
+                        : 'bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-800/60'
+                    }`}
+                  >
+                    Date
+                  </button>
+                )}
             </div>
           </div>
 
@@ -958,24 +1048,42 @@ export function BoundingBoxOverlay({
 
               {/* Snap buttons inside modal */}
               <div className="flex items-center gap-1">
-                {declarations?.net_quantity?.box_2d && (
-                  <button
-                    type="button"
-                    onClick={() => snapToField('net_qty', declarations.net_quantity.box_2d)}
-                    className="px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-700/60 font-semibold text-[10px] cursor-pointer"
-                  >
-                    🎯 Net Qty
-                  </button>
-                )}
-                {declarations?.mrp?.box_2d && (
-                  <button
-                    type="button"
-                    onClick={() => snapToField('mrp', declarations.mrp.box_2d)}
-                    className="px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-700/60 font-semibold text-[10px] cursor-pointer"
-                  >
-                    🎯 MRP
-                  </button>
-                )}
+                {declarations?.net_quantity?.box_2d &&
+                  (declarations.net_quantity.box_2d.image_index === undefined ||
+                    declarations.net_quantity.box_2d.image_index === surfaceIndex) &&
+                  Boolean((declarations.net_quantity.numeric_value ?? 0) > 0 && declarations.net_quantity.raw_text?.trim()) && (
+                    <button
+                      type="button"
+                      onClick={() => snapToField('net_qty', declarations.net_quantity.box_2d)}
+                      className="px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-700/60 font-semibold text-[10px] cursor-pointer"
+                    >
+                      Net Qty
+                    </button>
+                  )}
+                {declarations?.mrp?.box_2d &&
+                  (declarations.mrp.box_2d.image_index === undefined ||
+                    declarations.mrp.box_2d.image_index === surfaceIndex) &&
+                  Boolean((declarations.mrp.numeric_value ?? 0) > 0 && declarations.mrp.raw_text?.trim()) && (
+                    <button
+                      type="button"
+                      onClick={() => snapToField('mrp', declarations.mrp.box_2d)}
+                      className="px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-700/60 font-semibold text-[10px] cursor-pointer"
+                    >
+                      MRP
+                    </button>
+                  )}
+                {declarations?.mfg_or_import_date?.box_2d &&
+                  (declarations.mfg_or_import_date.box_2d.image_index === undefined ||
+                    declarations.mfg_or_import_date.box_2d.image_index === surfaceIndex) &&
+                  Boolean(declarations.mfg_or_import_date.is_detected && declarations.mfg_or_import_date.raw_text?.trim()) && (
+                    <button
+                      type="button"
+                      onClick={() => snapToField('mfg', declarations.mfg_or_import_date.box_2d)}
+                      className="px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-700/60 font-semibold text-[10px] cursor-pointer"
+                    >
+                      Date
+                    </button>
+                  )}
               </div>
             </div>
 
@@ -1125,7 +1233,7 @@ export function BoundingBoxOverlay({
                             fill={isCompliant ? '#4ade80' : '#f87171'}
                             fontFamily="sans-serif"
                           >
-                            {isCompliant ? `✓ Rule 7 Pass (≥ ${requiredMm}mm)` : `⚠️ Under-sized (< ${requiredMm}mm)`}
+                            {isCompliant ? `Rule 7 Pass (≥ ${requiredMm}mm)` : `Under-sized (< ${requiredMm}mm)`}
                           </text>
                         </g>
                       );

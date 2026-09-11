@@ -596,13 +596,7 @@
             "raw_text": "Colgate-Palmolive (India) Limited, Hiranandani Gardens, Powai, Mumbai - 400076",
             "is_detected": true,
             "has_pin_code": true,
-            "has_state_or_city": true,
-            "box_2d": {
-              "ymin": 110,
-              "xmin": 480,
-              "ymax": 280,
-              "xmax": 970
-            }
+            "has_state_or_city": true
           },
           "net_quantity": {
             "raw_text": "TOTAL NET WT. & QTY 300g + 1N TOOTHBRUSH",
@@ -611,82 +605,46 @@
             "is_standard_unit": true,
             "has_space_separation": false,
             "box_2d": {
-              "ymin": 550,
-              "xmin": 40,
-              "ymax": 640,
-              "xmax": 420
+              "ymin": 860,
+              "xmin": 580,
+              "ymax": 920,
+              "xmax": 960
             }
           },
           "mrp": {
             "raw_text": "₹ 378.00",
             "numeric_value": 378,
             "has_inclusive_of_taxes": true,
-            "box_2d": {
-              "ymin": 460,
-              "xmin": 280,
-              "ymax": 560,
-              "xmax": 620
-            },
             "currency": "₹"
           },
           "unit_sale_price": {
             "raw_text": "₹ 1.26/g",
             "is_declared": true,
-            "box_2d": {
-              "ymin": 570,
-              "xmin": 250,
-              "ymax": 660,
-              "xmax": 620
-            },
             "price_per_unit": 1.26,
             "unit": "g"
           },
           "mfg_or_import_date": {
             "raw_text": "04/26",
             "is_detected": true,
-            "box_2d": {
-              "ymin": 660,
-              "xmin": 340,
-              "ymax": 750,
-              "xmax": 580
-            },
             "month": 4,
             "year": 2026
           },
           "expiry_or_best_before": {
             "raw_text": "Expiry 24 Months From MFD.",
             "is_detected": true,
-            "is_declared": true,
-            "box_2d": {
-              "ymin": 880,
-              "xmin": 215,
-              "ymax": 950,
-              "xmax": 370
-            }
+            "is_declared": true
           },
           "consumer_care": {
             "raw_text": "Consumer Affairs Officer, Regd. Off.: Colgate-Palmolive (India) Limited, Hiranandani Gardens, Powai, Mumbai - 400076. Tel: 1800-225599 E-mail: consumeraffairs_india@colpal.com",
             "has_phone": true,
             "has_email": true,
             "address": "Colgate-Palmolive (India) Limited, Hiranandani Gardens, Powai, Mumbai - 400076",
-            "box_2d": {
-              "ymin": 110,
-              "xmin": 480,
-              "ymax": 280,
-              "xmax": 970
-            },
             "email": "consumeraffairs_india@colpal.com",
             "phone": "1800-225599"
           },
           "country_of_origin": {
             "raw_text": "MADE IN INDIA",
             "is_detected": true,
-            "box_2d": {
-              "ymin": 860,
-              "xmin": 830,
-              "ymax": 930,
-              "xmax": 960
-            },
             "confidence": 0.99
           },
           "package_pdp_box": {
