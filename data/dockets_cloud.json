@@ -2,6 +2,20 @@
   "dockets": [
     {
       "result": {
+        "inspection_id": "INSP-CROSS-SYNC-1789107808207",
+        "timestamp": "2026-09-11T06:23:28.207Z",
+        "overall_status": "COMPLIANT",
+        "compliance_score": 100,
+        "violations": []
+      },
+      "commodityLabel": "Cross-System Test Biscuit",
+      "manufacturerLabel": "Apex Foods Ltd",
+      "images": [
+        "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA="
+      ]
+    },
+    {
+      "result": {
         "inspection_id": "INSP-46227647",
         "timestamp": "2026-09-10T13:17:07.647Z",
         "extracted_data": {
@@ -953,5 +967,5 @@
   "tombstones": [
     "INSP-TEST-DELETE-SYNC"
   ],
-  "lastUpdated": 1789107670716
+  "lastUpdated": 1789107809932
 }
