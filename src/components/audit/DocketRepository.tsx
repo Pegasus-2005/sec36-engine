@@ -44,8 +44,12 @@ function formatTimestamp(iso: string): string {
 function topInfractionClause(dockets: DocketEntry[]): string {
   const freq: Record<string, number> = {};
   for (const d of dockets) {
-    for (const v of d.result.violations) {
-      freq[v.statutory_citation] = (freq[v.statutory_citation] ?? 0) + 1;
+    if (d?.result?.violations && Array.isArray(d.result.violations)) {
+      for (const v of d.result.violations) {
+        if (v?.statutory_citation) {
+          freq[v.statutory_citation] = (freq[v.statutory_citation] ?? 0) + 1;
+        }
+      }
     }
   }
   const top = Object.entries(freq).sort((a, b) => b[1] - a[1])[0];
@@ -64,14 +68,14 @@ function topInfractionClause(dockets: DocketEntry[]): string {
 function generateCSV(dockets: DocketEntry[]): string {
   const headers = ['Docket ID', 'Timestamp', 'Commodity', 'Manufacturer', 'MRP (Rs)', 'Status', 'Score (%)', 'Violated Rules'];
   const rows = dockets.map((d) => [
-    d.result.inspection_id,
-    new Date(d.result.timestamp).toLocaleString('en-IN'),
-    d.commodityLabel,
-    d.manufacturerLabel,
-    d.result.extracted_data.mrp.numeric_value?.toString() ?? '',
-    d.result.overall_status,
-    d.result.compliance_score.toString(),
-    d.result.violations.map((v: ViolationRecord) => v.statutory_citation).join('; '),
+    d.result?.inspection_id || '',
+    d.result?.timestamp ? new Date(d.result.timestamp).toLocaleString('en-IN') : '',
+    d.commodityLabel || '',
+    d.manufacturerLabel || '',
+    d.result?.extracted_data?.mrp?.numeric_value?.toString() ?? '',
+    d.result?.overall_status || '',
+    d.result?.compliance_score?.toString() || '0',
+    Array.isArray(d.result?.violations) ? d.result.violations.map((v: ViolationRecord) => v?.statutory_citation).filter(Boolean).join('; ') : '',
   ]);
   const escape = (s: string) => `"${s.replace(/"/g, '""')}"`;
   return [headers.map(escape).join(','), ...rows.map((r) => r.map(escape).join(','))].join('\n');
@@ -152,28 +156,33 @@ export function DocketRepository({ liveDockets, onViewAudit, onDownloadForm1, on
   const [filter, setFilter] = useState<FilterMode>('all');
 
   const allDockets = useMemo(() => {
-    const list = [...liveDockets];
-    list.sort((a, b) => new Date(b.result.timestamp).getTime() - new Date(a.result.timestamp).getTime());
+    const list = (liveDockets || []).filter((d) => d && d.result);
+    list.sort((a, b) => {
+      const tB = b?.result?.timestamp ? new Date(b.result.timestamp).getTime() : 0;
+      const tA = a?.result?.timestamp ? new Date(a.result.timestamp).getTime() : 0;
+      return tB - tA;
+    });
     return list;
   }, [liveDockets]);
 
   const totalInspected   = allDockets.length;
-  const totalViolations  = allDockets.filter((d) => d.result.overall_status !== 'COMPLIANT').length;
+  const totalViolations  = allDockets.filter((d) => d.result?.overall_status !== 'COMPLIANT').length;
   const violationPct     = totalInspected > 0 ? Math.round((totalViolations / totalInspected) * 100) : 0;
   const topClause        = topInfractionClause(allDockets);
-  const compoundingCount = allDockets.filter((d) => d.result.violations.some((v) => v.severity === 'CRITICAL')).length;
+  const compoundingCount = allDockets.filter((d) => Array.isArray(d.result?.violations) && d.result.violations.some((v) => v?.severity === 'CRITICAL')).length;
 
   const displayed = useMemo(() => {
     let list = allDockets;
-    if (filter === 'compliant')     list = list.filter((d) => d.result.overall_status === 'COMPLIANT');
-    if (filter === 'non_compliant') list = list.filter((d) => d.result.overall_status !== 'COMPLIANT');
+    if (filter === 'compliant')     list = list.filter((d) => d.result?.overall_status === 'COMPLIANT');
+    if (filter === 'non_compliant') list = list.filter((d) => d.result?.overall_status !== 'COMPLIANT');
     const q = search.trim().toLowerCase();
     if (q) {
-      list = list.filter((d) =>
-        d.result.inspection_id.toLowerCase().includes(q) ||
-        d.commodityLabel.toLowerCase().includes(q) ||
-        d.manufacturerLabel.toLowerCase().includes(q),
-      );
+      list = list.filter((d) => {
+        const id = (d.result?.inspection_id || '').toLowerCase();
+        const com = (d.commodityLabel || '').toLowerCase();
+        const mfg = (d.manufacturerLabel || '').toLowerCase();
+        return id.includes(q) || com.includes(q) || mfg.includes(q);
+      });
     }
     return list;
   }, [allDockets, filter, search]);
@@ -293,7 +302,8 @@ export function DocketRepository({ liveDockets, onViewAudit, onDownloadForm1, on
           </span>
         </div>
 
-        <div style={{ overflowX: 'auto' }}>
+        {/* Desktop Table View (>= md) */}
+        <div className="hidden md:block overflow-x-auto">
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
             <thead>
               <tr style={{ backgroundColor: NIC_BG, borderBottom: `1px solid ${NIC_BORDER}` }}>
@@ -328,32 +338,32 @@ export function DocketRepository({ liveDockets, onViewAudit, onDownloadForm1, on
               )}
               {displayed.map((entry, idx) => (
                 <tr
-                  key={`${entry.result.inspection_id}-${idx}`}
+                  key={`${entry.result?.inspection_id || idx}-${idx}`}
                   style={{ borderBottom: `1px solid ${NIC_BORDER}`, backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}
                 >
                   <td style={{ padding: '10px 12px', borderRight: `1px solid ${NIC_BORDER}`, verticalAlign: 'top', minWidth: 180 }}>
-                    <div style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '11px', color: NIC_BLUE }}>{entry.result.inspection_id}</div>
-                    <div style={{ fontSize: '10px', color: '#6B7280', marginTop: 2 }}>{formatTimestamp(entry.result.timestamp)}</div>
+                    <div style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '11px', color: NIC_BLUE }}>{entry.result?.inspection_id || 'INSP-UNKNOWN'}</div>
+                    <div style={{ fontSize: '10px', color: '#6B7280', marginTop: 2 }}>{formatTimestamp(entry.result?.timestamp || '')}</div>
                   </td>
                   <td style={{ padding: '10px 12px', borderRight: `1px solid ${NIC_BORDER}`, verticalAlign: 'top', minWidth: 200 }}>
                     <div style={{ fontWeight: 600, color: '#111827' }}>{entry.commodityLabel}</div>
                     <div style={{ fontSize: '10px', color: '#6B7280', marginTop: 2 }}>{entry.manufacturerLabel}</div>
                   </td>
                   <td style={{ padding: '10px 12px', borderRight: `1px solid ${NIC_BORDER}`, verticalAlign: 'top', minWidth: 180 }}>
-                    {entry.result.violations.length === 0 ? (
+                    {(!entry.result?.violations || entry.result.violations.length === 0) ? (
                       <span style={{ fontSize: '11px', color: '#16a34a', display: 'flex', alignItems: 'center', gap: 4 }}>
                         <CheckCircle style={{ width: 12, height: 12 }} /> No violations
                       </span>
                     ) : (
                       <div>
                         {entry.result.violations.map((v: ViolationRecord, i: number) => (
-                          <ViolationBadge key={i} citation={v.statutory_citation} />
+                          <ViolationBadge key={i} citation={v?.statutory_citation || ''} />
                         ))}
                       </div>
                     )}
                   </td>
                   <td style={{ padding: '10px 12px', borderRight: `1px solid ${NIC_BORDER}`, verticalAlign: 'top', minWidth: 140 }}>
-                    <StatusPill status={entry.result.overall_status} score={entry.result.compliance_score} />
+                    <StatusPill status={entry.result?.overall_status || 'ACTION_REQUIRED'} score={entry.result?.compliance_score ?? 0} />
                   </td>
                   <td style={{ padding: '10px 12px', verticalAlign: 'top' }}>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -381,7 +391,7 @@ export function DocketRepository({ liveDockets, onViewAudit, onDownloadForm1, on
                         <button
                           onClick={() => {
                             if (window.confirm('Are you sure you want to delete this inspection record? This action cannot be undone.')) {
-                              onDeleteAudit(entry.result.inspection_id);
+                              onDeleteAudit(entry.result?.inspection_id || '');
                             }
                           }}
                           style={{
@@ -399,6 +409,95 @@ export function DocketRepository({ liveDockets, onViewAudit, onDownloadForm1, on
               ))}
             </tbody>
           </table>
+        </div>
+
+        {/* Mobile Card List View (< md) */}
+        <div className="block md:hidden divide-y divide-slate-200">
+          {displayed.length === 0 && (
+            <div style={{ padding: '32px 16px', textAlign: 'center' }}>
+              <FileText style={{ width: 32, height: 32, color: '#9CA3AF', margin: '0 auto 8px auto' }} />
+              <p style={{ margin: 0, fontWeight: 700, fontSize: '13px', color: '#374151' }}>
+                No Inspection Dockets in Repository
+              </p>
+              <p style={{ margin: '4px 0 0 0', fontSize: '11px', color: '#9CA3AF' }}>
+                {search || filter !== 'all'
+                  ? 'No records match your search or filter criteria.'
+                  : 'Audits completed on your mobile device will appear here automatically.'}
+              </p>
+            </div>
+          )}
+
+          {displayed.map((entry, idx) => (
+            <div key={`${entry.result?.inspection_id || idx}-${idx}`} className="p-3 bg-white flex flex-col gap-2.5">
+              {/* Card Header: Docket ID + Status */}
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <div className="font-mono font-bold text-xs text-[#0055A4]">
+                    {entry.result?.inspection_id || 'INSP-UNKNOWN'}
+                  </div>
+                  <div className="text-[10px] text-slate-500 mt-0.5">
+                    {formatTimestamp(entry.result?.timestamp || '')}
+                  </div>
+                </div>
+                <StatusPill status={entry.result?.overall_status || 'ACTION_REQUIRED'} score={entry.result?.compliance_score ?? 0} />
+              </div>
+
+              {/* Commodity & Manufacturer */}
+              <div className="bg-slate-50 p-2 rounded border border-slate-200 text-xs">
+                <div className="font-bold text-slate-900">{entry.commodityLabel}</div>
+                <div className="text-[11px] text-slate-600 mt-0.5 line-clamp-1">{entry.manufacturerLabel}</div>
+              </div>
+
+              {/* Violations Strip */}
+              <div>
+                {(!entry.result?.violations || entry.result.violations.length === 0) ? (
+                  <span className="text-[11px] text-emerald-700 font-semibold flex items-center gap-1">
+                    <CheckCircle className="w-3.5 h-3.5 text-emerald-600" /> Fully Compliant
+                  </span>
+                ) : (
+                  <div className="flex flex-wrap gap-1">
+                    {entry.result.violations.map((v: ViolationRecord, i: number) => (
+                      <ViolationBadge key={i} citation={v?.statutory_citation || ''} />
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Mobile Actions */}
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => onViewAudit(entry)}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2.5 bg-[#0055A4] text-white text-xs font-semibold rounded cursor-pointer"
+                >
+                  <Eye className="w-3.5 h-3.5" />
+                  <span>View Audit</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onDownloadForm1(entry)}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2.5 bg-white text-slate-700 border border-slate-300 text-xs font-semibold rounded cursor-pointer"
+                >
+                  <FileText className="w-3.5 h-3.5 text-slate-600" />
+                  <span>Form-1 PDF</span>
+                </button>
+                {onDeleteAudit && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (window.confirm('Delete this inspection docket?')) {
+                        onDeleteAudit(entry.result?.inspection_id || '');
+                      }
+                    }}
+                    className="p-1.5 text-red-600 bg-red-50 border border-red-200 rounded hover:bg-red-100 cursor-pointer"
+                    title="Delete Docket"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 

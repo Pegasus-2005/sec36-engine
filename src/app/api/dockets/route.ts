@@ -44,7 +44,7 @@ async function runKvCommand(command: any[]): Promise<any> {
   return data?.result;
 }
 
-/** Fetch dockets from GitHub storage branch (public read, works unauthenticated) */
+/** Fetch dockets from GitHub storage branch (works authenticated or public read) */
 async function getGithubDockets(): Promise<{ dockets: any[]; sha: string } | null> {
   if (!GITHUB_REPO) return null;
   try {
@@ -64,33 +64,51 @@ async function getGithubDockets(): Promise<{ dockets: any[]; sha: string } | nul
       }
     );
     if (!res.ok) {
-      console.warn(`[db:github] Fetch returned HTTP ${res.status}`);
+      console.warn(`[db:github] Contents fetch returned HTTP ${res.status}`);
       return null;
     }
     const data = await res.json();
-    if (!data.content) return null;
-    const content = JSON.parse(Buffer.from(data.content, 'base64').toString('utf8'));
-    lastGithubSha = data.sha;
-    return { dockets: Array.isArray(content) ? content : [], sha: data.sha };
+    lastGithubSha = data.sha || null;
+
+    // Case 1: Direct content available (file <= 1MB)
+    if (data.content && typeof data.content === 'string' && data.content.length > 0) {
+      const content = JSON.parse(Buffer.from(data.content, 'base64').toString('utf8'));
+      return { dockets: Array.isArray(content) ? content : [], sha: data.sha };
+    }
+
+    // Case 2: File > 1MB: GitHub omits content and supplies download_url
+    if (data.download_url) {
+      const rawRes = await fetch(`${data.download_url}?_t=${Date.now()}`, {
+        headers: GITHUB_TOKEN ? { Authorization: `Bearer ${GITHUB_TOKEN}` } : {},
+        cache: 'no-store',
+      });
+      if (rawRes.ok) {
+        const rawContent = await rawRes.json();
+        return { dockets: Array.isArray(rawContent) ? rawContent : [], sha: data.sha };
+      }
+    }
+
+    return null;
   } catch (err) {
     console.warn('[db:github] Read error:', err);
     return null;
   }
 }
 
-/** Persist dockets to GitHub storage branch */
+/** Persist dockets to GitHub storage branch with size enforcement and conflict retry */
 async function saveGithubDockets(dockets: any[]): Promise<boolean> {
   if (!GITHUB_REPO || !GITHUB_TOKEN) return false;
-  // Bound list to 50 latest entries to keep payload lean
-  const bounded = dockets.slice(0, 50).map((entry) => {
+
+  // Bound list to 50 latest entries and strictly bound image sizes to guarantee payload < 650KB
+  let bounded = dockets.slice(0, 50).map((entry) => {
     const clean = { ...entry };
-    if (clean.imageThumb && typeof clean.imageThumb === 'string' && clean.imageThumb.length > 250000) {
-      clean.imageThumb = clean.imageThumb.slice(0, 250000);
+    if (clean.imageThumb && typeof clean.imageThumb === 'string' && clean.imageThumb.length > 35000) {
+      clean.imageThumb = clean.imageThumb.slice(0, 35000);
     }
     if (Array.isArray(clean.images)) {
-      clean.images = clean.images.slice(0, 4).map((img: any) => {
-        if (typeof img === 'string' && img.length > 250000) {
-          return img.slice(0, 250000);
+      clean.images = clean.images.slice(0, 2).map((img: any) => {
+        if (typeof img === 'string' && img.length > 35000) {
+          return img.slice(0, 35000);
         }
         return img;
       });
@@ -98,16 +116,27 @@ async function saveGithubDockets(dockets: any[]): Promise<boolean> {
     return clean;
   });
 
-  const contentBase64 = Buffer.from(JSON.stringify(bounded, null, 2)).toString('base64');
+  // Ensure total payload is strictly under 700KB (GitHub 1MB limit is 1,000,000 bytes)
+  let jsonString = JSON.stringify(bounded, null, 2);
+  while (Buffer.byteLength(jsonString) > 700000 && bounded.length > 10) {
+    bounded = bounded.slice(0, bounded.length - 5);
+    jsonString = JSON.stringify(bounded, null, 2);
+  }
 
-  for (let attempt = 0; attempt < 3; attempt++) {
+  const contentBase64 = Buffer.from(jsonString).toString('base64');
+
+  for (let attempt = 0; attempt < 4; attempt++) {
     try {
       let sha = lastGithubSha;
-      if (!sha) {
+      if (!sha || attempt > 0) {
         const current = await getGithubDockets();
         sha = current?.sha || null;
       }
-      if (!sha) return false;
+      if (!sha) {
+        console.warn(`[db:github] No SHA available on attempt ${attempt + 1}`);
+        await new Promise((r) => setTimeout(r, 400));
+        continue;
+      }
 
       const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${GITHUB_FILE}`, {
         method: 'PUT',
@@ -126,16 +155,18 @@ async function saveGithubDockets(dockets: any[]): Promise<boolean> {
       });
 
       if (res.status === 409) {
-        // Conflict: remote was updated; refresh SHA and retry
         console.warn(`[db:github] Conflict on attempt ${attempt + 1}, refreshing SHA...`);
         lastGithubSha = null;
-        await new Promise((r) => setTimeout(r, 300));
+        await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
         continue;
       }
 
       if (!res.ok) {
-        console.warn(`[db:github] Save failed with HTTP ${res.status}`);
-        return false;
+        const errText = await res.text();
+        console.warn(`[db:github] Save failed with HTTP ${res.status}:`, errText);
+        lastGithubSha = null;
+        await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+        continue;
       }
 
       const resData = await res.json();
@@ -144,7 +175,7 @@ async function saveGithubDockets(dockets: any[]): Promise<boolean> {
     } catch (err) {
       console.warn(`[db:github] Write error on attempt ${attempt + 1}:`, err);
       lastGithubSha = null;
-      await new Promise((r) => setTimeout(r, 300));
+      await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
     }
   }
   return false;
@@ -285,7 +316,7 @@ export async function POST(request: Request) {
       // Handled gracefully on serverless read-only environments
     }
 
-    return NextResponse.json({ success: true, storageMode, count: updated.length });
+    return NextResponse.json({ success: true, saved, storageMode, count: updated.length });
   } catch (error) {
     console.error('Error writing to dockets DB:', error);
     return NextResponse.json({ success: false, error: 'Failed to write to database' }, { status: 500 });

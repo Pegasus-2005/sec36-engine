@@ -296,7 +296,25 @@ export default function Dashboard() {
     }
   }, [isHighContrast]);
 
-  // ── Load persisted docket history from API with real-time multi-device sync ──
+  // ── LocalStorage Key for offline & resilient field docket persistence ──
+  const DOCKET_LOCAL_STORAGE_KEY = 'emaap_national_docket_ledger_v2';
+
+  // ── 1. Hydrate docket ledger from localStorage immediately on mount ────────
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(DOCKET_LOCAL_STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setDocketHistory(parsed);
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to hydrate dockets from localStorage:', err);
+    }
+  }, []);
+
+  // ── Load persisted docket history with non-destructive union merge & background sync ──
   const fetchDockets = useCallback(() => {
     fetch(`/api/dockets?_t=${Date.now()}`, {
       cache: 'no-store',
@@ -309,19 +327,67 @@ export default function Dashboard() {
       .then((data) => {
         if (data && data.success && Array.isArray(data.dockets)) {
           setDocketHistory((prev) => {
-            if (prev.length !== data.dockets.length) {
-              return data.dockets;
+            const map = new Map<string, DocketEntry>();
+            const unsynced: DocketEntry[] = [];
+
+            // 1. Add remote items
+            for (const rItem of data.dockets) {
+              const id = rItem.result?.inspection_id || (rItem as any).inspection_id || (rItem as any).id;
+              if (id) map.set(id, rItem);
             }
+
+            // 2. Preserve local items that remote might have missed
+            for (const lItem of prev) {
+              const id = lItem.result?.inspection_id || (lItem as any).inspection_id || (lItem as any).id;
+              if (id) {
+                if (!map.has(id)) {
+                  map.set(id, lItem);
+                  unsynced.push(lItem);
+                } else {
+                  // Keep richer local images if remote was trimmed
+                  const remoteItem = map.get(id)!;
+                  if (!remoteItem.imageThumb && lItem.imageThumb) {
+                    map.set(id, { ...remoteItem, imageThumb: lItem.imageThumb, images: lItem.images || remoteItem.images });
+                  }
+                }
+              }
+            }
+
+            // 3. Auto-heal: If local had dockets that remote missed, sync them in the background
+            if (unsynced.length > 0) {
+              unsynced.forEach((missing) => {
+                fetch('/api/dockets', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(missing),
+                }).catch(() => {});
+              });
+            }
+
+            const merged = Array.from(map.values());
+            merged.sort((a, b) => {
+              const tB = b?.result?.timestamp ? new Date(b.result.timestamp).getTime() : 0;
+              const tA = a?.result?.timestamp ? new Date(a.result.timestamp).getTime() : 0;
+              return tB - tA;
+            });
+            const bounded = merged.slice(0, 100);
+
+            // Persist merged set to localStorage
+            try {
+              localStorage.setItem(DOCKET_LOCAL_STORAGE_KEY, JSON.stringify(bounded));
+            } catch {}
+
+            // Check if state actually changed before triggering re-render
             const prevIds = prev.map((d) => d.result?.inspection_id || '').join('|');
-            const newIds = data.dockets.map((d: any) => d.result?.inspection_id || '').join('|');
-            if (prevIds !== newIds) {
-              return data.dockets;
+            const newIds = bounded.map((d) => d.result?.inspection_id || '').join('|');
+            if (prevIds !== newIds || prev.length !== bounded.length) {
+              return bounded;
             }
             return prev;
           });
         }
       })
-      .catch(() => { /* ignore */ });
+      .catch(() => { /* ignore network blips */ });
   }, []);
 
   useEffect(() => {
@@ -350,6 +416,16 @@ export default function Dashboard() {
   }, [fetchDockets]);
 
   const handleDeleteDocket = async (id: string) => {
+    // 1. Remove from local state and localStorage immediately
+    setDocketHistory((prev) => {
+      const updated = prev.filter((d) => (d.result?.inspection_id || (d as any).inspection_id || (d as any).id) !== id);
+      try {
+        localStorage.setItem(DOCKET_LOCAL_STORAGE_KEY, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+
+    // 2. Send DELETE to server
     try {
       const res = await fetch(`/api/dockets?id=${encodeURIComponent(id)}`, {
         method: 'DELETE',
@@ -364,6 +440,13 @@ export default function Dashboard() {
   };
 
   const handleClearAllDockets = async () => {
+    // 1. Clear local state and localStorage immediately
+    setDocketHistory([]);
+    try {
+      localStorage.removeItem(DOCKET_LOCAL_STORAGE_KEY);
+    } catch {}
+
+    // 2. Clear remote
     try {
       const res = await fetch('/api/dockets?all=true', { method: 'DELETE' });
       const data = await res.json();
@@ -377,12 +460,12 @@ export default function Dashboard() {
 
   const createOptimizedThumb = async (raw?: string): Promise<string | undefined> => {
     if (!raw) return undefined;
-    if (!raw.startsWith('data:image')) return raw;
+    if (!raw.startsWith('data:image')) return raw.length < 50000 ? raw : undefined;
     return new Promise((resolve) => {
       const img = new Image();
       img.onload = () => {
         let { width, height } = img;
-        const maxDim = 800;
+        const maxDim = 320; // Crisp preview thumbnail, <25KB
         if (width > maxDim || height > maxDim) {
           if (width > height) {
             height = Math.round((height * maxDim) / width);
@@ -396,11 +479,11 @@ export default function Dashboard() {
         canvas.width = width;
         canvas.height = height;
         const ctx = canvas.getContext('2d');
-        if (!ctx) { resolve(raw); return; }
+        if (!ctx) { resolve(undefined); return; }
         ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', 0.8));
+        resolve(canvas.toDataURL('image/jpeg', 0.65));
       };
-      img.onerror = () => resolve(raw);
+      img.onerror = () => resolve(undefined); // Never fallback to raw multi-megabyte string
       img.src = raw;
     });
   };
@@ -414,12 +497,12 @@ export default function Dashboard() {
     const thumb = await createOptimizedThumb(imageThumb);
     const rawList = allImages && allImages.length > 0 ? allImages : (thumb ? [thumb] : []);
     const optImages = await Promise.all(
-      rawList.slice(0, 4).map((img) => createOptimizedThumb(img))
+      rawList.slice(0, 2).map((img) => createOptimizedThumb(img))
     );
     const validImages = optImages.filter((img): img is string => !!img);
 
-    const commodity = result.extracted_data.commodity_name?.raw_text || 'Unknown Commodity';
-    const manufacturer = result.extracted_data.manufacturer?.raw_text || 'Unknown Manufacturer';
+    const commodity = result.extracted_data?.commodity_name?.raw_text || 'Unknown Commodity';
+    const manufacturer = result.extracted_data?.manufacturer?.raw_text || 'Unknown Manufacturer';
     const entry: DocketEntry = {
       result,
       commodityLabel: commodity || 'Unidentified Packaged Commodity',
@@ -427,14 +510,31 @@ export default function Dashboard() {
       imageThumb: thumb,
       images: validImages.length > 0 ? validImages : (thumb ? [thumb] : undefined),
     };
-    setDocketHistory((prev) => [entry, ...prev].slice(0, 100)); // optimistic UI update
+
+    // 1. Immediately update React state AND localStorage
+    setDocketHistory((prev) => {
+      const id = entry.result?.inspection_id;
+      const filtered = prev.filter((d) => (d.result?.inspection_id || (d as any).id) !== id);
+      const updated = [entry, ...filtered].slice(0, 100);
+      try {
+        localStorage.setItem(DOCKET_LOCAL_STORAGE_KEY, JSON.stringify(updated));
+      } catch (e) {
+        console.warn('localStorage write failed:', e);
+      }
+      return updated;
+    });
+
+    // 2. Persist to cloud/backend
     try {
-      await fetch('/api/dockets', {
+      const res = await fetch('/api/dockets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(entry),
       });
-      fetchDockets();
+      if (res.ok) {
+        // Trigger soft sync after 400ms to reconcile with cloud
+        setTimeout(() => fetchDockets(), 400);
+      }
     } catch (err) {
       console.error('Failed to persist docket entry to /api/dockets:', err);
     }
