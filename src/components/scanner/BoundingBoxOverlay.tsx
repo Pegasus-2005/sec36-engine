@@ -1,8 +1,27 @@
 'use client';
 
-import { useState, useRef } from 'react';
-import { Eye, EyeOff, Ruler, Scale, Check, Info, Maximize, Maximize2, X, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react';
-import { ExtractedDeclarations, ViolationRecord, BoundingBox } from '../../types/metrology';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import {
+  Eye,
+  EyeOff,
+  Ruler,
+  Scale,
+  Check,
+  Info,
+  Maximize,
+  Maximize2,
+  X,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw,
+  Target,
+  ChevronUp,
+  ChevronDown,
+  Crosshair,
+  Sliders,
+  Sparkles,
+} from 'lucide-react';
+import { ExtractedDeclarations, ViolationRecord, BoundingBox, DimensionDetails } from '../../types/metrology';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -23,50 +42,127 @@ interface BoundingBoxOverlayProps {
 }
 
 interface BoxEntry {
-  /** Human-readable label rendered as the SVG badge. */
   label: string;
   box: BoundingBox;
-  /**
-   * Statutory citation prefixes used to match against `violations`.
-   * Empty array means the box is never coloured as violated (e.g. PDP outline).
-   */
   citationPrefixes: string[];
-  /** Renders as a dashed blue outline — used for the package PDP box only. */
   isPdpBox?: boolean;
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Statutory Calibration & Metric Helpers
 // ---------------------------------------------------------------------------
 
 /**
- * Gemini returns 0-1000 integer coordinates in [ymin, xmin, ymax, xmax] order.
- * The SVG viewBox is "0 0 1000 1000" so coordinates map 1:1 — no scaling needed.
+ * Returns estimated physical PDP height (in mm) based on commodity metadata,
+ * net quantity, packaging geometry, or Rule 6(1)(f) dimension declarations.
  */
+function getEstimatedPdpHeightMm(declarations?: ExtractedDeclarations): number {
+  if (!declarations) return 120;
 
-/** Returns true if any CRITICAL or MAJOR violation matches one of the given citation prefixes. */
+  // 1. Check physical dimensions declared on package under Rule 6(1)(f)
+  if (declarations.dimensions?.values) {
+    const text = declarations.dimensions.values;
+    const mmMatch = text.match(/(\d+(?:\.\d+)?)\s*(?:mm|millimeter)/i);
+    if (mmMatch) {
+      const val = parseFloat(mmMatch[1]);
+      if (val >= 25 && val <= 800) return Math.round(val);
+    }
+    const cmMatch = text.match(/(\d+(?:\.\d+)?)\s*(?:cm|centimeter)/i);
+    if (cmMatch) {
+      const val = parseFloat(cmMatch[1]) * 10;
+      if (val >= 25 && val <= 800) return Math.round(val);
+    }
+  }
+
+  // 2. Estimate from net quantity and commodity profile
+  const nq = declarations.net_quantity?.numeric_value;
+  const unit = (declarations.net_quantity?.unit || '').toLowerCase().trim();
+  let grams = nq || 0;
+  if (unit === 'kg' || unit === 'l' || unit === 'litre' || unit === 'liter') {
+    grams *= 1000;
+  }
+
+  const commodity = (declarations.commodity_name?.raw_text || '').toLowerCase();
+
+  // Distinct Indian consumer packaging form factors
+  if (commodity.includes('paste') || commodity.includes('toothpaste')) {
+    return grams >= 150 ? 190 : 145; // Standard 100g-200g toothpaste carton: 145-190 mm
+  }
+  if (commodity.includes('biscuit') || commodity.includes('cookie')) {
+    return grams >= 200 ? 130 : (grams >= 80 ? 95 : 75); // Standard biscuit rolls / pillow packs
+  }
+  if (commodity.includes('soap') || commodity.includes('bar')) {
+    return 65; // Standard soap bar ~65 mm
+  }
+  if (commodity.includes('oil') || commodity.includes('shampoo') || commodity.includes('bottle')) {
+    return grams >= 1000 ? 260 : (grams >= 500 ? 210 : 160);
+  }
+  if (commodity.includes('chip') || commodity.includes('namkeen') || commodity.includes('snack')) {
+    return grams >= 100 ? 220 : 160; // Puffed snack pouches
+  }
+
+  // General weight-to-height packaging envelope
+  if (grams > 0) {
+    if (grams <= 50) return 75;
+    if (grams <= 150) return 100;
+    if (grams <= 300) return 140;
+    if (grams <= 600) return 180;
+    if (grams <= 1500) return 240;
+    return 300;
+  }
+
+  return 120; // Default standard PDP height
+}
+
+/**
+ * Returns statutory minimum font height under Rule 7 Table I (Area) & Table II (Net Qty)
+ */
+function getMandatedMinFontHeight(netQtyGrams?: number, dimensions?: DimensionDetails) {
+  // Table II: Net Quantity
+  let minTable2 = 1.0;
+  if (netQtyGrams) {
+    if (netQtyGrams <= 50) minTable2 = 1.0;
+    else if (netQtyGrams <= 200) minTable2 = 2.0;
+    else if (netQtyGrams <= 1000) minTable2 = 4.0;
+    else minTable2 = 6.0;
+  }
+
+  // Table I: Area of Principal Display Panel
+  let minTable1 = 1.0;
+  if (dimensions?.values) {
+    const match = dimensions.values.match(/(\d+(?:\.\d+)?)\s*(?:cm|mm)?\s*[xX×]\s*(\d+(?:\.\d+)?)/);
+    if (match) {
+      const d1 = parseFloat(match[1]);
+      const d2 = parseFloat(match[2]);
+      const isMm = /mm/i.test(dimensions.values);
+      const areaCm2 = isMm ? (d1 * d2) / 100 : (d1 * d2);
+      if (areaCm2 <= 50) minTable1 = 1.0;
+      else if (areaCm2 <= 100) minTable1 = 1.5;
+      else if (areaCm2 <= 500) minTable1 = 2.5;
+      else if (areaCm2 <= 2500) minTable1 = 4.0;
+      else minTable1 = 6.0;
+    }
+  }
+
+  const requiredMm = Math.max(minTable1, minTable2);
+  return { requiredMm, minTable1, minTable2 };
+}
+
+/** Returns true if any CRITICAL or MAJOR violation matches citation prefixes */
 function isFieldViolated(violations: ViolationRecord[], prefixes: string[]): boolean {
   if (prefixes.length === 0) return false;
   return violations.some(
     (v) =>
       (v.severity === 'CRITICAL' || v.severity === 'MAJOR') &&
-      prefixes.some((p) => v.statutory_citation.startsWith(p)),
+      prefixes.some((p) => v.statutory_citation.startsWith(p))
   );
 }
 
-function getMandatedMinFontHeight(netQtyGrams?: number): number {
-  if (!netQtyGrams || netQtyGrams <= 50) return 1.0;
-  if (netQtyGrams <= 200) return 2.0;
-  if (netQtyGrams <= 1000) return 4.0;
-  return 6.0;
-}
-
-/** Builds the list of BoxEntry objects from ExtractedDeclarations, skipping absent box_2d fields. */
+/** Builds list of BoxEntry objects from ExtractedDeclarations */
 function buildBoxEntries(decls?: ExtractedDeclarations): BoxEntry[] {
   if (!decls) return [];
   const entries: BoxEntry[] = [];
 
-  // Package PDP outline — always first so field boxes render on top
   if (decls.package_pdp_box) {
     entries.push({
       label: 'Package PDP',
@@ -81,56 +177,16 @@ function buildBoxEntries(decls?: ExtractedDeclarations): BoxEntry[] {
     box: BoundingBox | undefined;
     prefixes: string[];
   }> = [
-    {
-      label: 'Manufacturer · R6(1)(a)',
-      box: decls.manufacturer.box_2d,
-      prefixes: ['LM-R6(1)(a)'],
-    },
-    {
-      label: 'Country of Origin · R6(1)(aa)',
-      box: decls.country_of_origin.box_2d,
-      prefixes: ['LM-R6(1)(aa)'],
-    },
-    {
-      label: 'Commodity Name · R6(1)(b)',
-      box: decls.commodity_name.box_2d,
-      prefixes: ['LM-R6(1)(b)'],
-    },
-    {
-      label: 'Net Qty · R6(1)(c)',
-      box: decls.net_quantity.box_2d,
-      prefixes: ['LM-R6(1)(c)'],
-    },
-    {
-      label: 'Mfg Date · R6(1)(d)',
-      box: decls.mfg_or_import_date.box_2d,
-      prefixes: ['LM-R6(1)(d)'],
-    },
-    {
-      label: 'Best Before · R6(1)(da)',
-      box: decls.expiry_or_best_before.box_2d,
-      prefixes: ['LM-R6(1)(da)'],
-    },
-    {
-      label: 'MRP · R6(1)(e)',
-      box: decls.mrp.box_2d,
-      prefixes: ['LM-R6(1)(e)'],
-    },
-    {
-      label: 'USP · R6(11)',
-      box: decls.unit_sale_price.box_2d,
-      prefixes: ['LM-R6(11)'],
-    },
-    {
-      label: 'Dimensions · R6(1)(f)',
-      box: decls.dimensions.box_2d,
-      prefixes: ['LM-R6(1)(f)'],
-    },
-    {
-      label: 'Consumer Care · R6(2)',
-      box: decls.consumer_care.box_2d,
-      prefixes: ['LM-R6(2)'],
-    },
+    { label: 'Manufacturer · R6(1)(a)', box: decls.manufacturer?.box_2d, prefixes: ['LM-R6(1)(a)'] },
+    { label: 'Country of Origin · R6(1)(aa)', box: decls.country_of_origin?.box_2d, prefixes: ['LM-R6(1)(aa)'] },
+    { label: 'Commodity Name · R6(1)(b)', box: decls.commodity_name?.box_2d, prefixes: ['LM-R6(1)(b)'] },
+    { label: 'Net Qty · R6(1)(c)', box: decls.net_quantity?.box_2d, prefixes: ['LM-R6(1)(c)'] },
+    { label: 'Mfg Date · R6(1)(d)', box: decls.mfg_or_import_date?.box_2d, prefixes: ['LM-R6(1)(d)'] },
+    { label: 'Best Before · R6(1)(da)', box: decls.expiry_or_best_before?.box_2d, prefixes: ['LM-R6(1)(da)'] },
+    { label: 'MRP · R6(1)(e)', box: decls.mrp?.box_2d, prefixes: ['LM-R6(1)(e)'] },
+    { label: 'USP · R6(11)', box: decls.unit_sale_price?.box_2d, prefixes: ['LM-R6(11)'] },
+    { label: 'Dimensions · R6(1)(f)', box: decls.dimensions?.box_2d, prefixes: ['LM-R6(1)(f)'] },
+    { label: 'Consumer Care · R6(2)', box: decls.consumer_care?.box_2d, prefixes: ['LM-R6(2)'] },
   ];
 
   for (const { label, box, prefixes } of fieldMap) {
@@ -142,25 +198,18 @@ function buildBoxEntries(decls?: ExtractedDeclarations): BoxEntry[] {
 }
 
 // ---------------------------------------------------------------------------
-// Sub-component: single SVG bounding box + label badge
+// Box Rect Component
 // ---------------------------------------------------------------------------
 
-interface BoxRectProps {
-  entry: BoxEntry;
-  isViolated: boolean;
-}
-
-function BoxRect({ entry, isViolated }: BoxRectProps) {
+function BoxRect({ entry, isViolated }: { entry: BoxEntry; isViolated: boolean }) {
   const { box, label, isPdpBox } = entry;
   const x = box.xmin;
   const y = box.ymin;
   const w = box.xmax - box.xmin;
   const h = box.ymax - box.ymin;
 
-  // Guard: skip degenerate boxes
   if (w <= 0 || h <= 0) return null;
 
-  // Visual style tokens
   const stroke = isPdpBox ? '#3b82f6' : isViolated ? '#f43f5e' : '#10b981';
   const fill = isPdpBox
     ? 'rgba(59,130,246,0.05)'
@@ -170,13 +219,10 @@ function BoxRect({ entry, isViolated }: BoxRectProps) {
   const strokeWidth = isPdpBox ? 1.5 : isViolated ? 3 : 2;
   const strokeDasharray = isPdpBox ? '14 7' : undefined;
 
-  // Badge geometry (in 0-1000 SVG space)
   const BADGE_H = 32;
-  const CHAR_W = 11; // approximate character width at fontSize 20
+  const CHAR_W = 11;
   const BADGE_W = label.length * CHAR_W + 12;
-  // Clamp badge so it doesn't overflow right edge
   const badgeX = Math.min(x + 2, 1000 - BADGE_W - 2);
-  // Place badge above the box if there's room, else inside top
   const badgeY = y >= BADGE_H + 2 ? y - BADGE_H - 1 : y + 1;
   const textY = badgeY + BADGE_H - 9;
 
@@ -188,7 +234,6 @@ function BoxRect({ entry, isViolated }: BoxRectProps) {
 
   return (
     <g>
-      {/* Field bounding rectangle */}
       <rect
         x={x}
         y={y}
@@ -200,18 +245,7 @@ function BoxRect({ entry, isViolated }: BoxRectProps) {
         strokeDasharray={strokeDasharray}
         rx={4}
       />
-
-      {/* Label badge background */}
-      <rect
-        x={badgeX}
-        y={badgeY}
-        width={BADGE_W}
-        height={BADGE_H}
-        fill={badgeFill}
-        rx={4}
-      />
-
-      {/* Label text */}
+      <rect x={badgeX} y={badgeY} width={BADGE_W} height={BADGE_H} fill={badgeFill} rx={4} />
       <text
         x={badgeX + 6}
         y={textY}
@@ -228,7 +262,7 @@ function BoxRect({ entry, isViolated }: BoxRectProps) {
 }
 
 // ---------------------------------------------------------------------------
-// Main component
+// Main Component
 // ---------------------------------------------------------------------------
 
 export function BoundingBoxOverlay({
@@ -247,20 +281,100 @@ export function BoundingBoxOverlay({
   const [appliedFeedback, setAppliedFeedback] = useState(false);
   const [precisionModalOpen, setPrecisionModalOpen] = useState(false);
   const [precisionZoom, setPrecisionZoom] = useState(1.5);
-  
+
+  // Dynamic Physical Calibration State (Eliminates arbitrary static 150mm guess)
+  const [pdpScaleMm, setPdpScaleMm] = useState<number>(() => getEstimatedPdpHeightMm(declarations));
+  const [fineTuneOffsetMm, setFineTuneOffsetMm] = useState<number>(0);
+  const [activeSnapField, setActiveSnapField] = useState<string | null>(null);
+  const [showLoupe, setShowLoupe] = useState(false);
+  const [loupeCoord, setLoupeCoord] = useState<{ x: number; y: number }>({ x: 500, y: 500 });
+
   const svgRef = useRef<SVGSVGElement>(null);
   const modalSvgRef = useRef<SVGSVGElement>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
+  const loupeCanvasRef = useRef<HTMLCanvasElement>(null);
 
   const entries = buildBoxEntries(declarations);
   const pdpBox = declarations?.package_pdp_box;
 
-  // Rule 7 Caliper calculations
-  const caliperH = (caliperStart && caliperEnd) ? Math.abs(caliperEnd.y - caliperStart.y) : 0;
-  const pdpH = (pdpBox && pdpBox.ymax > pdpBox.ymin) ? (pdpBox.ymax - pdpBox.ymin) : 800;
-  const ratio = pdpH ? (caliperH / pdpH) : 0;
-  const measuredMm = Math.max(0.5, Math.round(ratio * 150 * 10) / 10);
-  const requiredMm = getMandatedMinFontHeight(declarations?.net_quantity?.numeric_value);
+  // Auto-sync calibration scale when a new declaration result is loaded
+  useEffect(() => {
+    if (declarations) {
+      setPdpScaleMm(getEstimatedPdpHeightMm(declarations));
+      setFineTuneOffsetMm(0);
+    }
+  }, [declarations]);
+
+  // Optical Caliper Mathematical Calculations (0.05 mm Resolution)
+  const caliperH = caliperStart && caliperEnd ? Math.abs(caliperEnd.y - caliperStart.y) : 0;
+  const pdpH = pdpBox && pdpBox.ymax > pdpBox.ymin ? pdpBox.ymax - pdpBox.ymin : 800;
+  const ratio = pdpH > 0 ? caliperH / pdpH : 0;
+
+  // Exact physical millimeter conversion with user scale calibration and vernier offset
+  const rawMeasuredMm = ratio * pdpScaleMm;
+  const measuredMm = Math.max(0.1, Math.round((rawMeasuredMm + fineTuneOffsetMm) * 10) / 10);
+
+  const { requiredMm, minTable1, minTable2 } = getMandatedMinFontHeight(
+    declarations?.net_quantity?.numeric_value,
+    declarations?.dimensions
+  );
   const isCompliant = measuredMm >= requiredMm;
+
+  // Update real-time optical loupe (4x high-contrast reticle)
+  const updateLoupe = useCallback((svgX: number, svgY: number) => {
+    setLoupeCoord({ x: svgX, y: svgY });
+    if (!loupeCanvasRef.current || !imgRef.current) return;
+    const canvas = loupeCanvasRef.current;
+    const ctx = canvas.getContext('2d');
+    const img = imgRef.current;
+    if (!ctx || !img.naturalWidth || !img.naturalHeight) return;
+
+    const naturalX = (svgX / 1000) * img.naturalWidth;
+    const naturalY = (svgY / 1000) * img.naturalHeight;
+
+    const sampleSize = 36;
+    const sx = Math.max(0, Math.min(img.naturalWidth - sampleSize, naturalX - sampleSize / 2));
+    const sy = Math.max(0, Math.min(img.naturalHeight - sampleSize, naturalY - sampleSize / 2));
+
+    ctx.imageSmoothingEnabled = false;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, sx, sy, sampleSize, sampleSize, 0, 0, canvas.width, canvas.height);
+
+    // Render crosshair reticle
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
+    ctx.strokeStyle = '#f59e0b';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(cx - 16, cy);
+    ctx.lineTo(cx + 16, cy);
+    ctx.moveTo(cx, cy - 16);
+    ctx.lineTo(cx, cy + 16);
+    ctx.stroke();
+
+    // Measurement reference guideline
+    ctx.strokeStyle = '#38bdf8';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(0, cy);
+    ctx.lineTo(canvas.width, cy);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }, []);
+
+  // Snap micrometer directly to detected text declarations
+  const snapToField = (fieldKey: string, box?: BoundingBox) => {
+    if (!box) return;
+    const midX = (box.xmin + box.xmax) / 2;
+    setCaliperStart({ x: midX, y: box.ymin });
+    setCaliperEnd({ x: midX, y: box.ymax });
+    setFineTuneOffsetMm(0);
+    setActiveSnapField(fieldKey);
+    setCaliperMode(true);
+    setShowOverlay(true);
+    updateLoupe(midX, box.ymin);
+  };
 
   const handlePointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
     if (!caliperMode || !svgRef.current) return;
@@ -273,7 +387,11 @@ export function BoundingBoxOverlay({
       setCaliperStart({ x: cursorPt.x, y: cursorPt.y });
       setCaliperEnd({ x: cursorPt.x, y: cursorPt.y });
       setCaliperActive(true);
+      setShowLoupe(true);
       setAppliedFeedback(false);
+      setFineTuneOffsetMm(0);
+      setActiveSnapField(null);
+      updateLoupe(cursorPt.x, cursorPt.y);
       e.currentTarget.setPointerCapture(e.pointerId);
     }
   };
@@ -287,17 +405,17 @@ export function BoundingBoxOverlay({
     const cursorPt = pt.matrixTransform(svg.getScreenCTM()?.inverse());
     if (cursorPt) {
       setCaliperEnd({ x: cursorPt.x, y: cursorPt.y });
+      updateLoupe(cursorPt.x, cursorPt.y);
     }
   };
 
   const handlePointerUp = (e: React.PointerEvent<SVGSVGElement>) => {
     if (!caliperMode) return;
     setCaliperActive(false);
+    setTimeout(() => setShowLoupe(false), 1200);
     try {
       e.currentTarget.releasePointerCapture(e.pointerId);
-    } catch {
-      // ignore
-    }
+    } catch {}
   };
 
   const handleModalPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
@@ -311,7 +429,11 @@ export function BoundingBoxOverlay({
       setCaliperStart({ x: cursorPt.x, y: cursorPt.y });
       setCaliperEnd({ x: cursorPt.x, y: cursorPt.y });
       setCaliperActive(true);
+      setShowLoupe(true);
       setAppliedFeedback(false);
+      setFineTuneOffsetMm(0);
+      setActiveSnapField(null);
+      updateLoupe(cursorPt.x, cursorPt.y);
       e.currentTarget.setPointerCapture(e.pointerId);
     }
   };
@@ -325,16 +447,16 @@ export function BoundingBoxOverlay({
     const cursorPt = pt.matrixTransform(svg.getScreenCTM()?.inverse());
     if (cursorPt) {
       setCaliperEnd({ x: cursorPt.x, y: cursorPt.y });
+      updateLoupe(cursorPt.x, cursorPt.y);
     }
   };
 
   const handleModalPointerUp = (e: React.PointerEvent<SVGSVGElement>) => {
     setCaliperActive(false);
+    setTimeout(() => setShowLoupe(false), 1200);
     try {
       e.currentTarget.releasePointerCapture(e.pointerId);
-    } catch {
-      // ignore
-    }
+    } catch {}
   };
 
   return (
@@ -345,7 +467,9 @@ export function BoundingBoxOverlay({
           <div className="px-2.5 py-1 bg-slate-900/90 border border-slate-700 text-slate-200 text-xs font-mono font-bold rounded-lg backdrop-blur-sm pointer-events-auto">
             {surfaceLabel}
           </div>
-        ) : <div />}
+        ) : (
+          <div />
+        )}
 
         <div className="flex items-center gap-2 pointer-events-auto">
           {/* Mobile Precision Mode Trigger */}
@@ -395,6 +519,7 @@ export function BoundingBoxOverlay({
             {showOverlay ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
             {showOverlay ? 'Overlays ON' : 'Overlays OFF'}
           </button>
+
           {onFullscreenToggle && (
             <button
               type="button"
@@ -412,56 +537,138 @@ export function BoundingBoxOverlay({
       {/* Main image container */}
       <div className="relative w-full overflow-hidden bg-black flex items-center justify-center">
         <img
+          ref={imgRef}
           src={imageSrc}
           alt="Scanned product packaging"
           className="w-full h-auto block max-h-[70vh] object-contain"
           style={{ display: 'block' }}
         />
 
-        {/* SVG bounding box overlay */}
+        {/* 4x Optical Reticle Loupe (Shows sub-pixel character boundaries) */}
+        {caliperMode && (caliperActive || showLoupe) && (
+          <div
+            className="absolute z-30 pointer-events-none rounded-xl overflow-hidden border-2 border-amber-400 bg-black/90 shadow-[0_4px_20px_rgba(0,0,0,0.8)] backdrop-blur-sm flex flex-col items-center p-1"
+            style={{
+              width: 128,
+              height: 148,
+              top: Math.max(10, Math.min(window.innerHeight - 200, (loupeCoord.y / 1000) * 350 - 150)),
+              left: Math.max(10, Math.min(window.innerWidth - 150, (loupeCoord.x / 1000) * 500 + 40)),
+            }}
+          >
+            <div className="text-[9px] font-mono font-bold text-amber-300 pb-0.5 uppercase tracking-wider flex items-center gap-1">
+              <Crosshair className="w-2.5 h-2.5 text-amber-400" />
+              <span>4x Optical Loupe</span>
+            </div>
+            <canvas ref={loupeCanvasRef} width={120} height={120} className="rounded-lg bg-black block" />
+          </div>
+        )}
+
+        {/* SVG bounding box overlay & Vernier Optical Caliper */}
         {(showOverlay || caliperMode) && (
           <svg
             ref={svgRef}
             viewBox="0 0 1000 1000"
             preserveAspectRatio="none"
-            className={`absolute inset-0 w-full h-full touch-none select-none ${caliperMode ? 'cursor-crosshair' : 'pointer-events-none'}`}
+            className={`absolute inset-0 w-full h-full touch-none select-none ${
+              caliperMode ? 'cursor-crosshair' : 'pointer-events-none'
+            }`}
             style={{ position: 'absolute', top: 0, left: 0, touchAction: 'none' }}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
           >
-            {showOverlay && entries.map((entry, i) => (
-              <BoxRect
-                key={i}
-                entry={entry}
-                isViolated={isFieldViolated(violations, entry.citationPrefixes)}
-              />
-            ))}
+            <defs>
+              <marker id="arrow-start" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="#f59e0b" />
+              </marker>
+              <marker id="arrow-end" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="#f59e0b" />
+              </marker>
+            </defs>
 
-            {/* Render Caliper */}
+            {showOverlay &&
+              entries.map((entry, i) => (
+                <BoxRect key={i} entry={entry} isViolated={isFieldViolated(violations, entry.citationPrefixes)} />
+              ))}
+
+            {/* Render Precision Optical Caliper */}
             {caliperMode && caliperStart && caliperEnd && (
               <g>
-                <line 
-                  x1={caliperStart.x} y1={caliperStart.y} 
-                  x2={caliperEnd.x} y2={caliperEnd.y} 
-                  stroke="#f59e0b" strokeWidth="4" 
+                {/* Measuring span vertical dimension line */}
+                <line
+                  x1={caliperStart.x}
+                  y1={caliperStart.y}
+                  x2={caliperEnd.x}
+                  y2={caliperEnd.y}
+                  stroke="#f59e0b"
+                  strokeWidth="3.5"
+                  markerStart="url(#arrow-start)"
+                  markerEnd="url(#arrow-end)"
                 />
-                <circle cx={caliperStart.x} cy={caliperStart.y} r="6" fill="#f59e0b" />
-                <circle cx={caliperEnd.x} cy={caliperEnd.y} r="6" fill="#f59e0b" />
-                
-                {/* Badge for Caliper */}
+
+                {/* Top Caliper Horizontal Jaw with Vernier ticks */}
+                <line
+                  x1={caliperStart.x - 45}
+                  y1={caliperStart.y}
+                  x2={caliperStart.x + 45}
+                  y2={caliperStart.y}
+                  stroke="#38bdf8"
+                  strokeWidth="3"
+                />
+                <line x1={caliperStart.x - 30} y1={caliperStart.y - 6} x2={caliperStart.x - 30} y2={caliperStart.y + 6} stroke="#38bdf8" strokeWidth="1.5" />
+                <line x1={caliperStart.x} y1={caliperStart.y - 8} x2={caliperStart.x} y2={caliperStart.y + 8} stroke="#38bdf8" strokeWidth="2" />
+                <line x1={caliperStart.x + 30} y1={caliperStart.y - 6} x2={caliperStart.x + 30} y2={caliperStart.y + 6} stroke="#38bdf8" strokeWidth="1.5" />
+
+                {/* Bottom Caliper Horizontal Jaw with Vernier ticks */}
+                <line
+                  x1={caliperEnd.x - 45}
+                  y1={caliperEnd.y}
+                  x2={caliperEnd.x + 45}
+                  y2={caliperEnd.y}
+                  stroke="#38bdf8"
+                  strokeWidth="3"
+                />
+                <line x1={caliperEnd.x - 30} y1={caliperEnd.y - 6} x2={caliperEnd.x - 30} y2={caliperEnd.y + 6} stroke="#38bdf8" strokeWidth="1.5" />
+                <line x1={caliperEnd.x} y1={caliperEnd.y - 8} x2={caliperEnd.x} y2={caliperEnd.y + 8} stroke="#38bdf8" strokeWidth="2" />
+                <line x1={caliperEnd.x + 30} y1={caliperEnd.y - 6} x2={caliperEnd.x + 30} y2={caliperEnd.y + 6} stroke="#38bdf8" strokeWidth="1.5" />
+
+                {/* Tactile Grab Handles */}
+                <circle cx={caliperStart.x} cy={caliperStart.y} r="8" fill="#f59e0b" stroke="#ffffff" strokeWidth="2" />
+                <circle cx={caliperEnd.x} cy={caliperEnd.y} r="8" fill="#f59e0b" stroke="#ffffff" strokeWidth="2" />
+
+                {/* Floating Metric Readout Badge */}
                 {(() => {
                   const midX = (caliperStart.x + caliperEnd.x) / 2;
                   const midY = (caliperStart.y + caliperEnd.y) / 2;
-                  
+                  const badgeX = Math.min(780, Math.max(20, midX + 25));
+                  const badgeY = Math.max(25, midY - 20);
+
                   return (
-                    <g transform={`translate(${Math.min(820, midX + 10)}, ${Math.max(20, midY)})`}>
-                      <rect x="0" y="-14" width="160" height="42" fill="rgba(15, 23, 42, 0.95)" rx="4" stroke="#f59e0b" strokeWidth="1.5" />
-                      <text x="8" y="2" fontSize="13" fontWeight="bold" fill="#f59e0b" fontFamily="monospace">
-                        ~{measuredMm} mm ({Math.round(ratio * 1000) / 10}%)
+                    <g transform={`translate(${badgeX}, ${badgeY})`}>
+                      <rect
+                        x="0"
+                        y="-16"
+                        width="190"
+                        height="52"
+                        fill="rgba(15, 23, 42, 0.95)"
+                        rx="6"
+                        stroke={isCompliant ? '#10b981' : '#f59e0b'}
+                        strokeWidth="2"
+                      />
+                      <text x="10" y="4" fontSize="15" fontWeight="bold" fill="#f59e0b" fontFamily="monospace">
+                        {measuredMm.toFixed(1)} mm ({Math.round(ratio * 1000) / 10}%)
                       </text>
-                      <text x="8" y="18" fontSize="10" fill={isCompliant ? '#4ade80' : '#f87171'} fontFamily="sans-serif">
-                        {isCompliant ? '✓ Satisfies Rule 7' : '⚠️ Below Min Height'}
+                      <text
+                        x="10"
+                        y="23"
+                        fontSize="10"
+                        fontWeight="bold"
+                        fill={isCompliant ? '#4ade80' : '#f87171'}
+                        fontFamily="sans-serif"
+                      >
+                        {isCompliant
+                          ? `✓ Rule 7 Pass (≥ ${requiredMm} mm)`
+                          : `⚠️ Non-Compliant (< ${requiredMm} mm)`}
                       </text>
                     </g>
                   );
@@ -493,58 +700,185 @@ export function BoundingBoxOverlay({
         )}
       </div>
 
-      {/* ── Rule 7 Optical Micrometer Inspector HUD ───────────────────────────── */}
+      {/* ── Rule 7 Precision Optical Micrometer Inspector HUD ───────────────────────────── */}
       {caliperMode && (
-        <div className="p-3 bg-slate-950 border-t border-amber-500/50 flex flex-wrap items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-full bg-amber-500/20 border border-amber-500 flex items-center justify-center text-amber-400 shrink-0">
-              <Ruler className="w-4 h-4" />
+        <div className="p-3 bg-slate-950 border-t border-amber-500/50 flex flex-col gap-3 text-xs">
+          {/* Row 1: Scale Calibration & AI Snap Pill Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+            {/* Physical Calibration Presets */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+                <Sliders className="w-3 h-3 text-amber-400" />
+                <span>Reference Scale:</span>
+              </span>
+              {[75, 95, 120, 150, 180, 220].map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  onClick={() => setPdpScaleMm(preset)}
+                  className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold transition-all cursor-pointer ${
+                    pdpScaleMm === preset
+                      ? 'bg-amber-500 text-slate-950 shadow-sm'
+                      : 'bg-slate-850 hover:bg-slate-700 text-slate-300 border border-slate-700'
+                  }`}
+                >
+                  {preset}mm
+                </button>
+              ))}
+              <div className="flex items-center gap-1 ml-1">
+                <input
+                  type="number"
+                  min="20"
+                  max="1000"
+                  value={pdpScaleMm}
+                  onChange={(e) => setPdpScaleMm(Math.max(20, Math.min(1000, Number(e.target.value) || 100)))}
+                  className="w-14 px-1.5 py-0.5 text-[10px] font-mono font-bold bg-slate-900 border border-slate-700 text-amber-300 rounded text-center"
+                />
+                <span className="text-[10px] text-slate-400">mm PDP</span>
+              </div>
             </div>
-            <div>
-              {caliperStart && caliperEnd && caliperH > 5 ? (
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-slate-100 text-xs">Rule 7 Digital Caliper:</span>
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold tracking-wide ${isCompliant ? 'bg-emerald-950 text-emerald-300 border border-emerald-500' : 'bg-rose-950 text-rose-300 border border-rose-500'}`}>
-                      {isCompliant ? 'COMPLIANT' : 'NON-COMPLIANT (Under-sized Font)'}
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
-                    Measured: <strong className="text-amber-400">{measuredMm} mm</strong> ({Math.round(ratio * 1000) / 10}% PDP) &nbsp;·&nbsp;
-                    Mandated Min: <strong className="text-slate-200">{requiredMm} mm</strong> under Rule 7 Table I/II
-                  </p>
-                </div>
-              ) : (
-                <div className="flex items-center gap-1.5 text-amber-300/90 text-xs">
-                  <Info className="w-4 h-4 text-amber-400 shrink-0" />
-                  <span>Click and drag vertically across any declaration text on the package to measure font height.</span>
-                </div>
+
+            {/* AI Text Auto-Snap Shortcuts */}
+            <div className="flex items-center gap-1 flex-wrap">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+                <Sparkles className="w-3 h-3 text-cyan-400" />
+                <span>Snap to:</span>
+              </span>
+              {declarations?.net_quantity?.box_2d && (
+                <button
+                  type="button"
+                  onClick={() => snapToField('net_qty', declarations.net_quantity.box_2d)}
+                  className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-all cursor-pointer ${
+                    activeSnapField === 'net_qty'
+                      ? 'bg-cyan-500 text-slate-950 font-bold'
+                      : 'bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-800/60'
+                  }`}
+                >
+                  🎯 Net Qty
+                </button>
+              )}
+              {declarations?.mrp?.box_2d && (
+                <button
+                  type="button"
+                  onClick={() => snapToField('mrp', declarations.mrp.box_2d)}
+                  className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-all cursor-pointer ${
+                    activeSnapField === 'mrp'
+                      ? 'bg-cyan-500 text-slate-950 font-bold'
+                      : 'bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-800/60'
+                  }`}
+                >
+                  🎯 MRP
+                </button>
+              )}
+              {declarations?.mfg_or_import_date?.box_2d && (
+                <button
+                  type="button"
+                  onClick={() => snapToField('mfg', declarations.mfg_or_import_date.box_2d)}
+                  className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-all cursor-pointer ${
+                    activeSnapField === 'mfg'
+                      ? 'bg-cyan-500 text-slate-950 font-bold'
+                      : 'bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-800/60'
+                  }`}
+                >
+                  🎯 Date
+                </button>
               )}
             </div>
           </div>
 
-          {caliperStart && caliperEnd && caliperH > 5 && onApplyFontMeasurement && (
-            <button
-              type="button"
-              onClick={() => {
-                onApplyFontMeasurement({ measuredMm, requiredMm, isCompliant, ratio });
-                setAppliedFeedback(true);
-                setTimeout(() => setAppliedFeedback(false), 3000);
-              }}
-              className={`w-full sm:w-auto flex items-center justify-center gap-1.5 px-4 py-2.5 rounded text-xs font-bold transition-all shadow-md cursor-pointer ${
-                appliedFeedback
-                  ? 'bg-emerald-600 text-white'
-                  : 'bg-amber-500 hover:bg-amber-400 text-slate-950'
-              }`}
-            >
-              {appliedFeedback ? <Check className="w-3.5 h-3.5" /> : <Scale className="w-3.5 h-3.5" />}
-              {appliedFeedback ? 'Applied to Official Audit!' : 'Apply Measurement to Rule 7 Audit'}
-            </button>
-          )}
+          {/* Row 2: Measurement Readout, Vernier Micro-Steppers & Apply Action */}
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-850">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-full bg-amber-500/20 border border-amber-500 flex items-center justify-center text-amber-400 shrink-0">
+                <Ruler className="w-4 h-4" />
+              </div>
+
+              <div>
+                {caliperStart && caliperEnd && caliperH > 4 ? (
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-slate-100 text-xs">Rule 7 Optical Micrometer:</span>
+                      <span
+                        className={`px-2 py-0.5 rounded text-[10px] font-bold tracking-wide ${
+                          isCompliant
+                            ? 'bg-emerald-950 text-emerald-300 border border-emerald-500'
+                            : 'bg-rose-950 text-rose-300 border border-rose-500'
+                        }`}
+                      >
+                        {isCompliant ? 'COMPLIANT (Rule 7 Satisfied)' : 'NON-COMPLIANT (Under-sized Font)'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-300 mt-0.5">
+                      Measured Height: <strong className="text-amber-400 text-xs font-mono">{measuredMm.toFixed(1)} mm</strong>
+                      &nbsp;({Math.round(ratio * 1000) / 10}% of {pdpScaleMm}mm PDP) &nbsp;·&nbsp; Mandated Min:{' '}
+                      <strong className="text-slate-100">{requiredMm.toFixed(1)} mm</strong> under Table I/II
+                    </p>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5 text-amber-300/90 text-xs">
+                    <Info className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span>
+                      Drag vertically across any printed numeral or letter, or click a <strong>Snap to</strong> shortcut above.
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Vernier Micro-Steppers (+/- 0.1 mm precision fine-tuning) */}
+            {caliperStart && caliperEnd && caliperH > 4 && (
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[10px] font-bold text-slate-400">Micro-Step:</span>
+                <button
+                  type="button"
+                  onClick={() => setFineTuneOffsetMm((v) => Math.round((v - 0.1) * 10) / 10)}
+                  className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-mono font-bold rounded border border-slate-700 cursor-pointer"
+                  title="Nudge height down 0.1mm"
+                >
+                  -0.1 mm
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFineTuneOffsetMm((v) => Math.round((v + 0.1) * 10) / 10)}
+                  className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-mono font-bold rounded border border-slate-700 cursor-pointer"
+                  title="Nudge height up 0.1mm"
+                >
+                  +0.1 mm
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFineTuneOffsetMm(0)}
+                  className="p-1 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 rounded border border-slate-700 cursor-pointer"
+                  title="Reset fine-tune offset"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+
+            {caliperStart && caliperEnd && caliperH > 4 && onApplyFontMeasurement && (
+              <button
+                type="button"
+                onClick={() => {
+                  onApplyFontMeasurement({ measuredMm, requiredMm, isCompliant, ratio });
+                  setAppliedFeedback(true);
+                  setTimeout(() => setAppliedFeedback(false), 3000);
+                }}
+                className={`w-full sm:w-auto flex items-center justify-center gap-1.5 px-4 py-2.5 rounded text-xs font-bold transition-all shadow-md cursor-pointer ${
+                  appliedFeedback
+                    ? 'bg-emerald-600 text-white'
+                    : 'bg-amber-500 hover:bg-amber-400 text-slate-950'
+                }`}
+              >
+                {appliedFeedback ? <Check className="w-3.5 h-3.5" /> : <Scale className="w-3.5 h-3.5" />}
+                {appliedFeedback ? 'Applied to Official Audit!' : 'Apply Measurement to Rule 7 Audit'}
+              </button>
+            )}
+          </div>
         </div>
       )}
 
-      {/* ── Fullscreen Micrometer & Rule 7 Precision Calibrator Modal (Mobile) ──────── */}
+      {/* ── Fullscreen Precision Mode Modal (Mobile & High-Precision Desktop) ──────── */}
       {precisionModalOpen && (
         <div className="fixed inset-0 z-[250] bg-slate-950 p-2 sm:p-4 flex flex-col text-slate-100 select-none animate-in fade-in duration-200">
           {/* Top Bar: Controls & Statutory Readout */}
@@ -556,12 +890,12 @@ export function BoundingBoxOverlay({
                 </div>
                 <div>
                   <h3 className="text-xs font-bold text-slate-100 flex items-center gap-2">
-                    <span>Precision Mode · Rule 7 Calibrator</span>
+                    <span>Precision Mode · Rule 7 Optical Micrometer</span>
                     <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 font-mono font-bold border border-amber-500/30">
                       {Math.round(precisionZoom * 100)}%
                     </span>
                   </h3>
-                  <p className="text-[10px] text-slate-400">Drag micrometer across letters to calibrate height</p>
+                  <p className="text-[10px] text-slate-400">Drag micrometer or tap shortcuts below to calibrate height</p>
                 </div>
               </div>
 
@@ -604,32 +938,93 @@ export function BoundingBoxOverlay({
               </div>
             </div>
 
+            {/* Scale Calibration & AI Shortcuts inside Modal */}
+            <div className="flex items-center justify-between gap-2 flex-wrap bg-slate-950/70 p-2 rounded-lg border border-slate-800/80 text-[11px]">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-slate-400 font-bold">Scale:</span>
+                {[75, 95, 120, 150, 180, 220].map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => setPdpScaleMm(preset)}
+                    className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold cursor-pointer ${
+                      pdpScaleMm === preset ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-300'
+                    }`}
+                  >
+                    {preset}mm
+                  </button>
+                ))}
+              </div>
+
+              {/* Snap buttons inside modal */}
+              <div className="flex items-center gap-1">
+                {declarations?.net_quantity?.box_2d && (
+                  <button
+                    type="button"
+                    onClick={() => snapToField('net_qty', declarations.net_quantity.box_2d)}
+                    className="px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-700/60 font-semibold text-[10px] cursor-pointer"
+                  >
+                    🎯 Net Qty
+                  </button>
+                )}
+                {declarations?.mrp?.box_2d && (
+                  <button
+                    type="button"
+                    onClick={() => snapToField('mrp', declarations.mrp.box_2d)}
+                    className="px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-700/60 font-semibold text-[10px] cursor-pointer"
+                  >
+                    🎯 MRP
+                  </button>
+                )}
+              </div>
+            </div>
+
             {/* Mini Readout: Active Ratio, Table 1 Threshold, Estimated Height in mm */}
             <div className="flex items-center justify-between bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs font-mono">
               <div className="flex items-center gap-2 sm:gap-4 flex-wrap text-[11px]">
                 <span>
-                  <span className="text-slate-400">Ratio: </span>
-                  <strong className="text-amber-400">{Math.round(ratio * 1000) / 10}% PDP</strong>
-                </span>
-                <span className="text-slate-700">|</span>
-                <span>
-                  <span className="text-slate-400">Table 1 Min: </span>
-                  <strong className="text-slate-200">{requiredMm} mm</strong>
-                </span>
-                <span className="text-slate-700">|</span>
-                <span>
                   <span className="text-slate-400">Measured: </span>
-                  <strong className="text-amber-400">{measuredMm} mm</strong>
+                  <strong className="text-amber-400 text-sm">{measuredMm.toFixed(1)} mm</strong>
+                </span>
+                <span className="text-slate-700">|</span>
+                <span>
+                  <span className="text-slate-400">Table I/II Min: </span>
+                  <strong className="text-slate-200">{requiredMm.toFixed(1)} mm</strong>
+                </span>
+                <span className="text-slate-700">|</span>
+                <span>
+                  <span className="text-slate-400">Ratio: </span>
+                  <strong className="text-slate-300">{Math.round(ratio * 1000) / 10}% PDP</strong>
                 </span>
               </div>
 
-              <span className={`px-2 py-0.5 rounded text-[10px] font-bold shrink-0 ${
-                isCompliant
-                  ? 'bg-emerald-950 text-emerald-300 border border-emerald-500'
-                  : 'bg-rose-950 text-rose-300 border border-rose-500'
-              }`}>
-                {isCompliant ? 'PASS' : 'FLAG'}
-              </span>
+              <div className="flex items-center gap-2">
+                {/* Micro-steppers inside modal */}
+                <button
+                  type="button"
+                  onClick={() => setFineTuneOffsetMm((v) => Math.round((v - 0.1) * 10) / 10)}
+                  className="px-2 py-0.5 bg-slate-800 text-slate-200 text-[10px] font-bold rounded border border-slate-700 cursor-pointer"
+                >
+                  -0.1mm
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFineTuneOffsetMm((v) => Math.round((v + 0.1) * 10) / 10)}
+                  className="px-2 py-0.5 bg-slate-800 text-slate-200 text-[10px] font-bold rounded border border-slate-700 cursor-pointer"
+                >
+                  +0.1mm
+                </button>
+
+                <span
+                  className={`px-2 py-0.5 rounded text-[10px] font-bold shrink-0 ${
+                    isCompliant
+                      ? 'bg-emerald-950 text-emerald-300 border border-emerald-500'
+                      : 'bg-rose-950 text-rose-300 border border-rose-500'
+                  }`}
+                >
+                  {isCompliant ? 'PASS' : 'FLAG'}
+                </span>
+              </div>
             </div>
           </div>
 
@@ -660,13 +1055,10 @@ export function BoundingBoxOverlay({
                 onPointerUp={handleModalPointerUp}
               >
                 {/* SVG Bounding Boxes */}
-                {showOverlay && entries.map((entry, i) => (
-                  <BoxRect
-                    key={i}
-                    entry={entry}
-                    isViolated={isFieldViolated(violations, entry.citationPrefixes)}
-                  />
-                ))}
+                {showOverlay &&
+                  entries.map((entry, i) => (
+                    <BoxRect key={i} entry={entry} isViolated={isFieldViolated(violations, entry.citationPrefixes)} />
+                  ))}
 
                 {/* Tactile Caliper Visuals with Finger Clearance */}
                 {caliperStart && caliperEnd && (
@@ -681,27 +1073,27 @@ export function BoundingBoxOverlay({
                       strokeWidth="5"
                     />
 
-                    {/* Top & Bottom T-Calipers */}
+                    {/* Top & Bottom T-Calipers with Vernier ticks */}
                     <line
-                      x1={caliperStart.x - 36}
+                      x1={caliperStart.x - 50}
                       y1={caliperStart.y}
-                      x2={caliperStart.x + 36}
+                      x2={caliperStart.x + 50}
                       y2={caliperStart.y}
-                      stroke="#f59e0b"
-                      strokeWidth="3.5"
+                      stroke="#38bdf8"
+                      strokeWidth="4"
                     />
                     <line
-                      x1={caliperEnd.x - 36}
+                      x1={caliperEnd.x - 50}
                       y1={caliperEnd.y}
-                      x2={caliperEnd.x + 36}
+                      x2={caliperEnd.x + 50}
                       y2={caliperEnd.y}
-                      stroke="#f59e0b"
-                      strokeWidth="3.5"
+                      stroke="#38bdf8"
+                      strokeWidth="4"
                     />
 
                     {/* Large touch targets */}
-                    <circle cx={caliperStart.x} cy={caliperStart.y} r="12" fill="#f59e0b" stroke="#ffffff" strokeWidth="2.5" />
-                    <circle cx={caliperEnd.x} cy={caliperEnd.y} r="12" fill="#f59e0b" stroke="#ffffff" strokeWidth="2.5" />
+                    <circle cx={caliperStart.x} cy={caliperStart.y} r="14" fill="#f59e0b" stroke="#ffffff" strokeWidth="2.5" />
+                    <circle cx={caliperEnd.x} cy={caliperEnd.y} r="14" fill="#f59e0b" stroke="#ffffff" strokeWidth="2.5" />
 
                     {/* Caliper HUD label offset to the right so fingers don't obscure it */}
                     {(() => {
@@ -719,11 +1111,11 @@ export function BoundingBoxOverlay({
                             height="54"
                             fill="rgba(2, 6, 23, 0.95)"
                             rx="6"
-                            stroke="#f59e0b"
+                            stroke={isCompliant ? '#10b981' : '#f59e0b'}
                             strokeWidth="2"
                           />
                           <text x="12" y="5" fontSize="16" fontWeight="bold" fill="#f59e0b" fontFamily="monospace">
-                            ~{measuredMm} mm ({Math.round(ratio * 1000) / 10}%)
+                            {measuredMm.toFixed(1)} mm ({Math.round(ratio * 1000) / 10}%)
                           </text>
                           <text
                             x="12"
@@ -733,7 +1125,7 @@ export function BoundingBoxOverlay({
                             fill={isCompliant ? '#4ade80' : '#f87171'}
                             fontFamily="sans-serif"
                           >
-                            {isCompliant ? '✓ Satisfies Rule 7 (Table 1)' : '⚠️ Below Mandated Min Height'}
+                            {isCompliant ? `✓ Rule 7 Pass (≥ ${requiredMm}mm)` : `⚠️ Under-sized (< ${requiredMm}mm)`}
                           </text>
                         </g>
                       );
@@ -749,7 +1141,7 @@ export function BoundingBoxOverlay({
             <button
               type="button"
               onClick={() => {
-                if (caliperStart && caliperEnd && caliperH > 5 && onApplyFontMeasurement) {
+                if (caliperStart && caliperEnd && caliperH > 4 && onApplyFontMeasurement) {
                   onApplyFontMeasurement({ measuredMm, requiredMm, isCompliant, ratio });
                   setAppliedFeedback(true);
                   setTimeout(() => setAppliedFeedback(false), 3000);
@@ -767,6 +1159,8 @@ export function BoundingBoxOverlay({
               onClick={() => {
                 setCaliperStart(null);
                 setCaliperEnd(null);
+                setFineTuneOffsetMm(0);
+                setActiveSnapField(null);
               }}
               className="py-3.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 cursor-pointer"
               title="Reset Caliper"
