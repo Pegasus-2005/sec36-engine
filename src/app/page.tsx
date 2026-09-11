@@ -297,7 +297,34 @@ export default function Dashboard() {
   }, [isHighContrast]);
 
   // ── LocalStorage Key for offline & resilient field docket persistence ──
+  // ── LocalStorage Keys for resilient multi-device sync ──
   const DOCKET_LOCAL_STORAGE_KEY = 'emaap_national_docket_ledger_v2';
+  const DOCKET_OUTBOX_KEY = 'emaap_docket_outbox_v2';
+  const DOCKET_TOMBSTONES_KEY = 'emaap_docket_tombstones_v2';
+
+  // Helper to read local tombstones
+  const getLocalTombstones = (): Set<string> => {
+    try {
+      const raw = localStorage.getItem(DOCKET_TOMBSTONES_KEY);
+      if (!raw) return new Set();
+      const list = JSON.parse(raw);
+      return new Set(Array.isArray(list) ? list : []);
+    } catch {
+      return new Set();
+    }
+  };
+
+  // Helper to read local outbox (pending audits not yet confirmed by server)
+  const getLocalOutbox = (): DocketEntry[] => {
+    try {
+      const raw = localStorage.getItem(DOCKET_OUTBOX_KEY);
+      if (!raw) return [];
+      const list = JSON.parse(raw);
+      return Array.isArray(list) ? list : [];
+    } catch {
+      return [];
+    }
+  };
 
   // ── 1. Hydrate docket ledger from localStorage immediately on mount ────────
   useEffect(() => {
@@ -306,7 +333,12 @@ export default function Dashboard() {
       if (stored) {
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          setDocketHistory(parsed);
+          const tombstones = getLocalTombstones();
+          const filtered = parsed.filter((d: any) => {
+            const id = d.result?.inspection_id || d.inspection_id || d.id;
+            return !id || !tombstones.has(id);
+          });
+          setDocketHistory(filtered);
         }
       }
     } catch (err) {
@@ -314,7 +346,7 @@ export default function Dashboard() {
     }
   }, []);
 
-  // ── Load persisted docket history with non-destructive union merge & background sync ──
+  // ── Real-time authoritative docket sync across devices ──
   const fetchDockets = useCallback(() => {
     fetch(`/api/dockets?_t=${Date.now()}`, {
       cache: 'no-store',
@@ -326,61 +358,70 @@ export default function Dashboard() {
       })
       .then((data) => {
         if (data && data.success && Array.isArray(data.dockets)) {
-          setDocketHistory((prev) => {
-            const map = new Map<string, DocketEntry>();
-            const unsynced: DocketEntry[] = [];
-
-            // 1. Add remote items
-            for (const rItem of data.dockets) {
-              const id = rItem.result?.inspection_id || (rItem as any).inspection_id || (rItem as any).id;
-              if (id) map.set(id, rItem);
-            }
-
-            // 2. Preserve local items that remote might have missed
-            for (const lItem of prev) {
-              const id = lItem.result?.inspection_id || (lItem as any).inspection_id || (lItem as any).id;
-              if (id) {
-                if (!map.has(id)) {
-                  map.set(id, lItem);
-                  unsynced.push(lItem);
-                } else {
-                  // Keep richer local images if remote was trimmed
-                  const remoteItem = map.get(id)!;
-                  if (!remoteItem.imageThumb && lItem.imageThumb) {
-                    map.set(id, { ...remoteItem, imageThumb: lItem.imageThumb, images: lItem.images || remoteItem.images });
-                  }
-                }
-              }
-            }
-
-            // 3. Auto-heal: If local had dockets that remote missed, sync them in the background
-            if (unsynced.length > 0) {
-              unsynced.forEach((missing) => {
-                fetch('/api/dockets', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify(missing),
-                }).catch(() => {});
-              });
-            }
-
-            const merged = Array.from(map.values());
-            merged.sort((a, b) => {
-              const tB = b?.result?.timestamp ? new Date(b.result.timestamp).getTime() : 0;
-              const tA = a?.result?.timestamp ? new Date(a.result.timestamp).getTime() : 0;
-              return tB - tA;
-            });
-            const bounded = merged.slice(0, 100);
-
-            // Persist merged set to localStorage
+          // 1. Merge server tombstones into local tombstones
+          const localTombstones = getLocalTombstones();
+          if (Array.isArray(data.tombstones)) {
+            data.tombstones.forEach((id: string) => localTombstones.add(id));
             try {
-              localStorage.setItem(DOCKET_LOCAL_STORAGE_KEY, JSON.stringify(bounded));
+              localStorage.setItem(DOCKET_TOMBSTONES_KEY, JSON.stringify(Array.from(localTombstones).slice(-100)));
             } catch {}
+          }
 
-            // Check if state actually changed before triggering re-render
+          // 2. Get local pending outbox
+          const outbox = getLocalOutbox();
+          const serverIds = new Set<string>();
+          for (const rItem of data.dockets) {
+            const id = rItem.result?.inspection_id || (rItem as any).inspection_id || (rItem as any).id;
+            if (id) serverIds.add(id);
+          }
+
+          // Filter outbox: drop items that are now confirmed on the server, or were deleted
+          const remainingOutbox = outbox.filter((item) => {
+            const id = item.result?.inspection_id || (item as any).inspection_id || (item as any).id;
+            if (!id) return false;
+            if (localTombstones.has(id)) return false;
+            if (serverIds.has(id)) return false; // Server has it! Outbox fulfilled
+            return true;
+          });
+
+          try {
+            localStorage.setItem(DOCKET_OUTBOX_KEY, JSON.stringify(remainingOutbox));
+          } catch {}
+
+          // 3. Retry background POST for any remaining un-synced outbox items
+          if (remainingOutbox.length > 0) {
+            remainingOutbox.forEach((unsynced) => {
+              fetch('/api/dockets', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(unsynced),
+              }).catch(() => {});
+            });
+          }
+
+          // 4. Build authoritative list: Server dockets MINUS tombstones PLUS remaining un-synced outbox
+          const filteredRemote = data.dockets.filter((rItem: DocketEntry) => {
+            const id = rItem.result?.inspection_id || (rItem as any).inspection_id || (rItem as any).id;
+            return !id || !localTombstones.has(id);
+          });
+
+          // Prepend un-synced outbox so local user still sees their offline audit until it syncs
+          const authoritative = [...remainingOutbox, ...filteredRemote];
+          authoritative.sort((a, b) => {
+            const tB = b?.result?.timestamp ? new Date(b.result.timestamp).getTime() : 0;
+            const tA = a?.result?.timestamp ? new Date(a.result.timestamp).getTime() : 0;
+            return tB - tA;
+          });
+          const bounded = authoritative.slice(0, 100);
+
+          // Update React state and localStorage
+          setDocketHistory((prev) => {
             const prevIds = prev.map((d) => d.result?.inspection_id || '').join('|');
             const newIds = bounded.map((d) => d.result?.inspection_id || '').join('|');
             if (prevIds !== newIds || prev.length !== bounded.length) {
+              try {
+                localStorage.setItem(DOCKET_LOCAL_STORAGE_KEY, JSON.stringify(bounded));
+              } catch {}
               return bounded;
             }
             return prev;
@@ -416,7 +457,23 @@ export default function Dashboard() {
   }, [fetchDockets]);
 
   const handleDeleteDocket = async (id: string) => {
-    // 1. Remove from local state and localStorage immediately
+    // 1. Immediately record in local tombstones
+    const localTombstones = getLocalTombstones();
+    localTombstones.add(id);
+    try {
+      localStorage.setItem(DOCKET_TOMBSTONES_KEY, JSON.stringify(Array.from(localTombstones).slice(-100)));
+    } catch {}
+
+    // 2. Remove from outbox if it was pending
+    try {
+      const outbox = getLocalOutbox().filter((item) => {
+        const itemId = item.result?.inspection_id || (item as any).inspection_id || (item as any).id;
+        return itemId !== id;
+      });
+      localStorage.setItem(DOCKET_OUTBOX_KEY, JSON.stringify(outbox));
+    } catch {}
+
+    // 3. Immediately remove from local state and localStorage
     setDocketHistory((prev) => {
       const updated = prev.filter((d) => (d.result?.inspection_id || (d as any).inspection_id || (d as any).id) !== id);
       try {
@@ -425,7 +482,7 @@ export default function Dashboard() {
       return updated;
     });
 
-    // 2. Send DELETE to server
+    // 4. Send DELETE to server
     try {
       const res = await fetch(`/api/dockets?id=${encodeURIComponent(id)}`, {
         method: 'DELETE',
@@ -444,6 +501,8 @@ export default function Dashboard() {
     setDocketHistory([]);
     try {
       localStorage.removeItem(DOCKET_LOCAL_STORAGE_KEY);
+      localStorage.removeItem(DOCKET_OUTBOX_KEY);
+      localStorage.removeItem(DOCKET_TOMBSTONES_KEY);
     } catch {}
 
     // 2. Clear remote
@@ -452,6 +511,7 @@ export default function Dashboard() {
       const data = await res.json();
       if (data.success) {
         setDocketHistory([]);
+        fetchDockets();
       }
     } catch (e) {
       console.error('Failed to clear all dockets:', e);
@@ -524,7 +584,15 @@ export default function Dashboard() {
       return updated;
     });
 
-    // 2. Persist to cloud/backend
+    // 2. Add to outbox until server confirms receipt
+    try {
+      const outbox = getLocalOutbox();
+      const id = entry.result?.inspection_id;
+      const filteredOutbox = outbox.filter((d) => (d.result?.inspection_id || (d as any).id) !== id);
+      localStorage.setItem(DOCKET_OUTBOX_KEY, JSON.stringify([entry, ...filteredOutbox].slice(0, 20)));
+    } catch {}
+
+    // 3. Persist to cloud/backend
     try {
       const res = await fetch('/api/dockets', {
         method: 'POST',
@@ -532,8 +600,15 @@ export default function Dashboard() {
         body: JSON.stringify(entry),
       });
       if (res.ok) {
-        // Trigger soft sync after 400ms to reconcile with cloud
-        setTimeout(() => fetchDockets(), 400);
+        const data = await res.json();
+        if (data.success && !data.ignored) {
+          // Remove from outbox
+          try {
+            const outbox = getLocalOutbox().filter((d) => (d.result?.inspection_id || (d as any).id) !== entry.result?.inspection_id);
+            localStorage.setItem(DOCKET_OUTBOX_KEY, JSON.stringify(outbox));
+          } catch {}
+        }
+        setTimeout(() => fetchDockets(), 300);
       }
     } catch (err) {
       console.error('Failed to persist docket entry to /api/dockets:', err);
@@ -1891,6 +1966,14 @@ export default function Dashboard() {
                       commodityLabel: draft.commodity_name.raw_text || next[idx].commodityLabel,
                       manufacturerLabel: draft.manufacturer.raw_text || next[idx].manufacturerLabel,
                     };
+                    try {
+                      localStorage.setItem(DOCKET_LOCAL_STORAGE_KEY, JSON.stringify(next));
+                      fetch('/api/dockets', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(next[idx]),
+                      }).catch(() => {});
+                    } catch {}
                     return next;
                   });
                   setAmendModalOpen(false);
