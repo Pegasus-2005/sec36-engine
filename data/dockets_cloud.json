@@ -1,6 +1,29 @@
 [
   {
     "result": {
+      "inspection_id": "INSP-TEST-MOBILE-1789106329346",
+      "timestamp": "2026-09-11T05:58:49.346Z",
+      "overall_status": "COMPLIANT",
+      "compliance_score": 100,
+      "violations": [],
+      "passed_rules": [
+        "LM-R6(1)(b): Commodity name verified"
+      ],
+      "extracted_data": {
+        "commodity_name": {
+          "raw_text": "Mobile Test Audit Biscuit"
+        },
+        "manufacturer": {
+          "raw_text": "National Biscuit Packers Ltd"
+        }
+      }
+    },
+    "commodityLabel": "Mobile Test Audit Biscuit",
+    "manufacturerLabel": "National Biscuit Packers Ltd",
+    "imageThumb": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA="
+  },
+  {
+    "result": {
       "inspection_id": "INSP-WB-2026-904",
       "timestamp": "2026-09-10T17:58:52.660Z",
       "overall_status": "NON_COMPLIANT",
