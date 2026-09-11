@@ -296,6 +296,25 @@ export default function Dashboard() {
     }
   }, [isHighContrast]);
 
+  // ── Suppress benign foreign browser extension runtime errors (e.g. Safari EmptyRanges) ──
+  useEffect(() => {
+    const handleGlobalError = (event: ErrorEvent) => {
+      if (
+        event?.message &&
+        (event.message.includes('EmptyRanges') ||
+         event.message.includes("Can't find variable: EmptyRanges"))
+      ) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return true;
+      }
+    };
+    window.addEventListener('error', handleGlobalError, true);
+    return () => {
+      window.removeEventListener('error', handleGlobalError, true);
+    };
+  }, []);
+
   // ── LocalStorage Key for offline & resilient field docket persistence ──
   // ── LocalStorage Keys for resilient multi-device sync ──
   const DOCKET_LOCAL_STORAGE_KEY = 'emaap_national_docket_ledger_v2';
